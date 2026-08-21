@@ -37,9 +37,87 @@ final class AppStore: ObservableObject {
 
     var selectedState: ProviderLoadState {
         if selected == .chatgpt {
-            return chatGPTState(for: settings.selectedChatGPTAccountId)
+            return aggregatedChatGPTState
         }
         return states[selected] ?? .idle
+    }
+
+    var cursorEmail: String? {
+        states[.cursor]?.snapshot?.accountEmail
+    }
+
+    var hasAmbientCodexAccount: Bool {
+        settings.chatgptAccounts.contains { account in
+            account.usesAmbientCodexHome || isAmbientHome(account.codexHomePath)
+        }
+    }
+
+    var chatgptDisplayRows: [ChatGPTDisplayRow] {
+        if !settings.chatgptAccounts.isEmpty {
+            return visibleChatGPTAccounts.map { account in
+                ChatGPTDisplayRow(
+                    id: account.id,
+                    account: account,
+                    state: chatgptStates[account.id] ?? .idle
+                )
+            }
+        }
+        let implicit = states[.chatgpt] ?? .idle
+        switch implicit {
+        case .ready, .loading, .failure:
+            return [ChatGPTDisplayRow(id: Self.implicitChatGPTID, account: nil, state: implicit)]
+        case .idle:
+            if settings.previewFixtures {
+                return [ChatGPTDisplayRow(id: Self.implicitChatGPTID, account: nil, state: implicit)]
+            }
+            return []
+        case .signedOut:
+            return []
+        }
+    }
+
+    private var aggregatedChatGPTState: ProviderLoadState {
+        if settings.chatgptAccounts.isEmpty {
+            return chatGPTState(for: nil)
+        }
+        let rows = visibleChatGPTAccounts.map { chatgptStates[$0.id] ?? .idle }
+        if rows.isEmpty {
+            return .signedOut(ProviderKind.chatgpt.signInHint)
+        }
+        let ready = rows.compactMap { state -> UsageSnapshot? in
+            if case .ready(let snapshot) = state { return snapshot }
+            return nil
+        }
+        if let combined = combineChatGPTSnapshots(ready) {
+            return .ready(combined)
+        }
+        if rows.contains(where: { if case .loading = $0 { return true }; return false }) {
+            return .loading
+        }
+        if rows.allSatisfy(\.isSignedOut) {
+            return .signedOut(ProviderKind.chatgpt.signInHint)
+        }
+        if let failure = rows.compactMap({ state -> String? in
+            if case .failure(let message) = state { return message }
+            return nil
+        }).first {
+            return .failure(failure)
+        }
+        return .idle
+    }
+
+    private func combineChatGPTSnapshots(_ snapshots: [UsageSnapshot]) -> UsageSnapshot? {
+        guard let first = snapshots.first else { return nil }
+        if snapshots.count == 1 { return first }
+        let remaining = snapshots.compactMap(\.mostConstrainedRemaining)
+        guard let lowest = remaining.min(),
+              let chosen = snapshots.first(where: { $0.mostConstrainedRemaining == lowest })
+        else { return first }
+        var combined = chosen
+        combined.accountEmail = nil
+        combined.planName = nil
+        combined.extraFooter = nil
+        return combined
     }
 
     var visibleProviders: [ProviderKind] {
@@ -221,17 +299,80 @@ final class AppStore: ObservableObject {
     }
 
     func deleteChatGPTAccount(_ id: UUID) {
+        let homePath = settings.chatgptAccounts.first(where: { $0.id == id })?.codexHomePath
+        let ambient = settings.chatgptAccounts.first(where: { $0.id == id })?.usesAmbientCodexHome ?? false
         settings.chatgptAccounts.removeAll { $0.id == id }
         chatgptCookies[id] = nil
         chatgptJSONs[id] = nil
         chatgptStates[id] = nil
         KeychainStore.delete(.chatgptAccountCookie(id))
         KeychainStore.delete(.chatgptAccountJSON(id))
+        if !ambient {
+            CodexCLIAuth.removeManagedHomeIfSafe(homePath)
+        }
         if settings.selectedChatGPTAccountId == id {
             settings.selectedChatGPTAccountId = settings.visibleChatGPTAccounts.first?.id
                 ?? settings.chatgptAccounts.first?.id
         }
         persistSettings()
+    }
+
+    @discardableResult
+    func importAmbientCodexAccountIfAvailable() -> UUID? {
+        if hasAmbientCodexAccount { return nil }
+        let home = CodexCLIAuth.defaultHomeURL()
+        guard let tokens = CodexCLIAuth.read(home: home) else { return nil }
+        return upsertChatGPTAccountFromCodexHome(
+            homePath: home.path,
+            email: tokens.email,
+            ambient: true
+        )
+    }
+
+    @discardableResult
+    func upsertChatGPTAccountFromCodexHome(
+        homePath: String,
+        email: String?,
+        ambient: Bool
+    ) -> UUID? {
+        let trimmedEmail = CodexCLIAuth.usableEmail(email)
+        let standardizedHome = CodexCLIAuth.homeURL(path: homePath)?.path(percentEncoded: false) ?? homePath
+
+        if let trimmedEmail,
+           let existing = settings.chatgptAccounts.first(where: {
+               $0.email?.caseInsensitiveCompare(trimmedEmail) == .orderedSame
+           }) {
+            if let index = settings.chatgptAccounts.firstIndex(where: { $0.id == existing.id }) {
+                let previousHome = settings.chatgptAccounts[index].codexHomePath
+                settings.chatgptAccounts[index].email = trimmedEmail
+                settings.chatgptAccounts[index].codexHomePath = standardizedHome
+                settings.chatgptAccounts[index].usesAmbientCodexHome = ambient
+                if previousHome != standardizedHome {
+                    CodexCLIAuth.removeManagedHomeIfSafe(previousHome)
+                }
+            }
+            settings.selectedChatGPTAccountId = existing.id
+            persistSettings()
+            Task { await refreshChatGPTAccount(existing.id, userInitiated: true) }
+            return existing.id
+        }
+
+        let label = trimmedEmail ?? nextChatGPTLabel()
+        let id = addChatGPTAccount(label: label)
+        if let index = settings.chatgptAccounts.firstIndex(where: { $0.id == id }) {
+            settings.chatgptAccounts[index].email = trimmedEmail
+            settings.chatgptAccounts[index].codexHomePath = standardizedHome
+            settings.chatgptAccounts[index].usesAmbientCodexHome = ambient
+        }
+        settings.selectedChatGPTAccountId = id
+        persistSettings()
+        Task { await refreshChatGPTAccount(id, userInitiated: true) }
+        return id
+    }
+
+    private func isAmbientHome(_ path: String?) -> Bool {
+        guard let url = CodexCLIAuth.homeURL(path: path) else { return false }
+        return CodexCLIAuth.isAmbientHome(url)
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -258,13 +399,7 @@ final class AppStore: ObservableObject {
         // Let SwiftUI paint the spinner before a fast fetch coalesces state updates.
         await Task.yield()
         if selected == .chatgpt {
-            if let id = settings.selectedChatGPTAccountId {
-                await refreshChatGPTAccount(id, userInitiated: true)
-            } else if settings.previewFixtures {
-                await refreshChatGPTPreviewFallback(userInitiated: true)
-            } else {
-                await refreshImplicitChatGPT(userInitiated: true)
-            }
+            await refreshAllChatGPTAccounts(userInitiated: true)
             return
         }
         await refresh(selected)
@@ -332,7 +467,9 @@ final class AppStore: ObservableObject {
             } else {
                 snapshot = try await ChatGPTClient.fetch(
                     cookie: emptyToNil(chatgptCookies[id, default: ""]),
-                    pastedJSON: emptyToNil(chatgptJSONs[id, default: ""])
+                    pastedJSON: emptyToNil(chatgptJSONs[id, default: ""]),
+                    codexHomePath: settings.chatgptAccounts.first(where: { $0.id == id })?.codexHomePath,
+                    allowAmbientCodex: false
                 )
             }
             chatgptStates[id] = .ready(snapshot)
@@ -356,7 +493,11 @@ final class AppStore: ObservableObject {
             states[.chatgpt] = .loading
         }
         do {
-            let snapshot = try await ChatGPTClient.fetch(cookie: nil, pastedJSON: nil)
+            let snapshot = try await ChatGPTClient.fetch(
+                cookie: nil,
+                pastedJSON: nil,
+                allowAmbientCodex: true
+            )
             states[.chatgpt] = .ready(snapshot)
         } catch let error as QuotaError {
             if error.isAuthFailure {
@@ -410,8 +551,8 @@ final class AppStore: ObservableObject {
     }
 
     private func recordChatGPTEmail(_ email: String?, for id: UUID) {
-        let trimmed = email?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let trimmed, !trimmed.isEmpty else { return }
+        let trimmed = CodexCLIAuth.usableEmail(email)
+        guard let trimmed else { return }
         guard let index = settings.chatgptAccounts.firstIndex(where: { $0.id == id }) else { return }
         guard settings.chatgptAccounts[index].email != trimmed else { return }
         settings.chatgptAccounts[index].email = trimmed
@@ -432,11 +573,13 @@ final class AppStore: ObservableObject {
             return try await CursorClient.fetch(cookie: emptyToNil(cursorCookie))
         case .chatgpt:
             guard let id = settings.selectedChatGPTAccountId else {
-                return try await ChatGPTClient.fetch(cookie: nil, pastedJSON: nil)
+                return try await ChatGPTClient.fetch(cookie: nil, pastedJSON: nil, allowAmbientCodex: true)
             }
             return try await ChatGPTClient.fetch(
                 cookie: emptyToNil(chatgptCookies[id, default: ""]),
-                pastedJSON: emptyToNil(chatgptJSONs[id, default: ""])
+                pastedJSON: emptyToNil(chatgptJSONs[id, default: ""]),
+                codexHomePath: settings.chatgptAccounts.first(where: { $0.id == id })?.codexHomePath,
+                allowAmbientCodex: false
             )
         case .glm:
             return try await GLMClient.fetch(apiKey: emptyToNil(glmAPIKey), region: settings.glmRegion)
@@ -447,4 +590,12 @@ final class AppStore: ObservableObject {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
+
+    static let implicitChatGPTID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+}
+
+struct ChatGPTDisplayRow: Identifiable, Equatable {
+    var id: UUID
+    var account: ChatGPTAccount?
+    var state: ProviderLoadState
 }

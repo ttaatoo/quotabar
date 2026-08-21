@@ -13,7 +13,13 @@ enum ChatGPTClient {
         "https://chatgpt.com/public-api/conversation_limit"
     ]
 
-    static func fetch(cookie pasted: String?, pastedJSON: String?, now: Date = Date()) async throws -> UsageSnapshot {
+    static func fetch(
+        cookie pasted: String?,
+        pastedJSON: String?,
+        codexHomePath: String? = nil,
+        allowAmbientCodex: Bool = false,
+        now: Date = Date()
+    ) async throws -> UsageSnapshot {
         let cookie = normalizeCookie(pasted)
         var lastError: Error?
         var cookieIdentity: Identity?
@@ -21,6 +27,15 @@ enum ChatGPTClient {
         var codexTokens: CodexCLIAuth.Tokens?
         var triedCodexAuth = false
         var gotJSONWithoutWindows = false
+
+        let scopedHome: URL?
+        if let custom = CodexCLIAuth.homeURL(path: codexHomePath) {
+            scopedHome = custom
+        } else if allowAmbientCodex {
+            scopedHome = CodexCLIAuth.defaultHomeURL()
+        } else {
+            scopedHome = nil
+        }
 
         if let cookie {
             do {
@@ -52,9 +67,9 @@ enum ChatGPTClient {
             }
         }
 
-        if cookie == nil || cookieUnauthorized {
+        if scopedHome != nil, cookie == nil || cookieUnauthorized {
             triedCodexAuth = true
-            if let tokens = CodexCLIAuth.read() {
+            if let tokens = CodexCLIAuth.read(home: scopedHome) {
                 codexTokens = tokens
                 do {
                     if let snapshot = try await requestWhamUsage(
@@ -116,7 +131,7 @@ enum ChatGPTClient {
                 return try parsePastedOrOfficial(pastedJSON, fetchedAt: now, source: .pastedJSON)
             }
             throw QuotaError.notSignedIn(
-                "Run `codex login` (QuotaBar reads ~/.codex/auth.json the same way CodexBar does), sign in to ChatGPT in Settings, or paste a session cookie / usage JSON."
+                "Add a ChatGPT account in Settings (`codex login` in your default browser), or paste a session cookie / usage JSON under Advanced."
             )
         }
 
@@ -127,10 +142,10 @@ enum ChatGPTClient {
         let who = fallbackEmail.map { " as \($0)" } ?? ""
         let plan = fallbackPlan.map { " (\($0))" } ?? ""
         let codexHint = triedCodexAuth && codexTokens == nil
-            ? " No readable ~/.codex/auth.json (from `codex login`) was found."
+            ? " No readable auth.json was found in that Codex home."
             : ""
         throw QuotaError.noUsableQuota(
-            "Signed in\(who)\(plan), but ChatGPT did not publish remaining/used percentages on wham/usage (or conversation_limit). CodexBar uses GET /backend-api/wham/usage with tokens from `codex login` (~/.codex/auth.json). QuotaBar does not invent numbers.\(codexHint)"
+            "Signed in\(who)\(plan), but ChatGPT did not publish remaining/used percentages on wham/usage (or conversation_limit). QuotaBar does not invent numbers.\(codexHint)"
         )
     }
 
@@ -248,10 +263,14 @@ enum ChatGPTClient {
         let account = object["account"] as? [String: Any]
         let plan = JSONWalk.string(account ?? [:], keys: ["planType", "plan", "plan_type"])
             ?? JSONWalk.string(user ?? [:], keys: ["planType", "plan"])
+        var email = CodexCLIAuth.email(from: object)
+        if email == nil {
+            email = CodexCLIAuth.identityFromJWT(accessToken).email
+        }
         return Identity(
             accessToken: accessToken,
-            email: user?["email"] as? String,
-            planName: plan.map(humanPlanName),
+            email: email,
+            planName: plan.map(CodexCLIAuth.humanPlanName),
             accountId: accountId(fromSession: object, accessToken: accessToken)
         )
     }
@@ -301,17 +320,7 @@ enum ChatGPTClient {
     }
 
     private static func humanPlanName(_ raw: String) -> String {
-        switch raw.lowercased() {
-        case "chatgptplusplan", "plus": return "Plus"
-        case "chatgptproplan", "pro": return "Pro"
-        case "chatgptteamplan", "team": return "Team"
-        case "chatgptenterpriseplan", "enterprise": return "Enterprise"
-        case "free", "chatgptfreeplan": return "Free"
-        default: return TitleCase.words(
-            raw.replacingOccurrences(of: "chatgpt", with: "", options: .caseInsensitive)
-                .replacingOccurrences(of: "plan", with: "", options: .caseInsensitive)
-        )
-        }
+        CodexCLIAuth.humanPlanName(raw)
     }
 
     // MARK: - Live usage
@@ -392,7 +401,7 @@ enum ChatGPTClient {
                 try HTTPClient.requireOK(response, data: data, host: url.host ?? "chatgpt.com")
                 let object = try JSONWalk.object(from: data)
                 if var snapshot = parseUsageObject(object, planName: planName, fetchedAt: now, source: .live) {
-                    snapshot.accountEmail = email
+                    snapshot.accountEmail = email ?? CodexCLIAuth.email(from: object) ?? snapshot.accountEmail
                     return snapshot
                 }
                 sawJSONWithoutWindows = true
@@ -533,6 +542,7 @@ enum ChatGPTClient {
         let plan = JSONWalk.string(raw, keys: ["plan_type", "planType", "plan"])
             .map(humanPlanName)
             ?? fallbackPlan
+        let resolvedEmail = email ?? CodexCLIAuth.email(from: raw)
 
         var snapshot = UsageSnapshot(
             provider: .chatgpt,
@@ -543,7 +553,7 @@ enum ChatGPTClient {
             source: source,
             extraFooter: creditsFooter(from: raw)
         )
-        snapshot.accountEmail = email
+        snapshot.accountEmail = resolvedEmail
         return snapshot
     }
 
@@ -781,55 +791,5 @@ enum ChatGPTClient {
             return nil
         }
         return value
-    }
-
-    /// Read-only Codex CLI OAuth file. Codex CLI owns refresh and writes;
-    /// QuotaBar never updates this file and never starts a Codex OAuth dance.
-    private enum CodexCLIAuth {
-        struct Tokens {
-            var accessToken: String
-            var accountId: String?
-            var email: String?
-            var planName: String?
-        }
-
-        static func fileURL() -> URL {
-            let env = ProcessInfo.processInfo.environment["CODEX_HOME"]?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if !env.isEmpty {
-                let expanded = (env as NSString).expandingTildeInPath
-                return URL(fileURLWithPath: expanded, isDirectory: true)
-                    .appendingPathComponent("auth.json")
-            }
-            return FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".codex", isDirectory: true)
-                .appendingPathComponent("auth.json")
-        }
-
-        static func read() -> Tokens? {
-            let url = fileURL()
-            let path = url.path(percentEncoded: false)
-            guard FileManager.default.fileExists(atPath: path),
-                  let data = try? Data(contentsOf: url),
-                  let object = try? JSONWalk.object(from: data)
-            else { return nil }
-
-            let tokens = object["tokens"] as? [String: Any] ?? [:]
-            guard let access = ChatGPTClient.nonEmpty(tokens["access_token"] as? String) else { return nil }
-
-            var accountId = ChatGPTClient.nonEmpty(tokens["account_id"] as? String)
-            var email: String?
-            if let idToken = ChatGPTClient.nonEmpty(tokens["id_token"] as? String),
-               let payload = JWT.payload(idToken) {
-                email = JSONWalk.string(payload, keys: ["email", "email_address", "preferred_username"])
-                if accountId == nil {
-                    accountId = ChatGPTClient.accountId(fromJWT: payload)
-                }
-            }
-            if accountId == nil, let payload = JWT.payload(access) {
-                accountId = ChatGPTClient.accountId(fromJWT: payload)
-            }
-            return Tokens(accessToken: access, accountId: accountId, email: email, planName: nil)
-        }
     }
 }

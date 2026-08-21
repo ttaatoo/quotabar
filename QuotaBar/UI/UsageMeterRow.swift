@@ -5,34 +5,39 @@ struct UsageMeterRow: View {
     let window: UsageWindow?
     let mode: DisplayMode
     let now: Date
+    var compact: Bool = false
 
-    init(window: UsageWindow, mode: DisplayMode, now: Date) {
+    init(window: UsageWindow, mode: DisplayMode, now: Date, compact: Bool = false) {
         self.title = window.title
         self.window = window
         self.mode = mode
         self.now = now
+        self.compact = compact
     }
 
-    init(title: String, window: UsageWindow?, mode: DisplayMode, now: Date) {
+    init(title: String, window: UsageWindow?, mode: DisplayMode, now: Date, compact: Bool = false) {
         self.title = title
         self.window = window
         self.mode = mode
         self.now = now
+        self.compact = compact
     }
 
     var body: some View {
         let active = window != nil
         let low = window?.isLow(mode: mode, threshold: Theme.lowQuotaThreshold) ?? false
         let fill = min(max((window?.displayedPercent(mode: mode) ?? 0) / 100, 0), 1)
+        let titleSize: CGFloat = compact ? 11.5 : 13
+        let footerSize: CGFloat = compact ? 10 : 10.5
 
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: compact ? 3 : 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text(title)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: titleSize, weight: .medium))
                     .foregroundStyle(active ? Theme.primary : Theme.secondary)
                 Spacer()
                 Text(active ? valueText : "—")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: titleSize, weight: .semibold))
                     .foregroundStyle(valueColor(active: active, low: low))
             }
 
@@ -47,11 +52,11 @@ struct UsageMeterRow: View {
                     }
                 }
             }
-            .frame(height: 3)
+            .frame(height: compact ? 2.5 : 3)
 
-            HStack(spacing: 5) {
+            HStack(spacing: 4) {
                 Image(systemName: "clock")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.system(size: compact ? 9 : 10, weight: .medium))
                 Text(active ? footerLeading : "—")
                     .lineLimit(1)
                 Spacer(minLength: 8)
@@ -60,11 +65,11 @@ struct UsageMeterRow: View {
                         .lineLimit(1)
                 }
             }
-            .font(.system(size: 10.5))
+            .font(.system(size: footerSize))
             .foregroundStyle(Theme.secondary)
             .opacity(active ? 1 : 0.7)
         }
-        .frame(height: Theme.meterRowHeight, alignment: .top)
+        .frame(height: compact ? Theme.compactMeterRowHeight : Theme.meterRowHeight, alignment: .top)
     }
 
     private func valueColor(active: Bool, low: Bool) -> Color {

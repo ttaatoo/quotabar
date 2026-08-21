@@ -18,30 +18,23 @@ enum Theme {
     static let logoPurple = Color(red: 0.71, green: 0.42, blue: 1.0)
     static let logoGreen = Color(red: 0.24, green: 0.86, blue: 0.59)
 
+    /// Frozen popover chrome. Do not resize NSPopover after the first show.
     static let popoverWidth: CGFloat = 312
-    static let popoverHorizontalPadding: CGFloat = 14
-    static let popoverPaddingTop: CGFloat = 13
-    static let popoverPaddingBottom: CGFloat = 11
-    static let popoverStackSpacing: CGFloat = 12
-    static let headerMinHeight: CGFloat = 34
-    static let providerSwitcherHeight: CGFloat = 26
-    /// Compact pill row under the provider switcher. Always reserved so tab height stays put.
-    static let accountRowHeight: CGFloat = 22
-    static let accountRowSpacing: CGFloat = 6
-    static let accountPillMaxWidth: CGFloat = 168
-    static let meterRowHeight: CGFloat = 52
-    static let meterSpacing: CGFloat = 14
-    static var meterStackHeight: CGFloat { (meterRowHeight * 2) + meterSpacing }
-    /// Tall enough for 11.5pt copy + a ~22pt capsule action without clipping.
-    static let statusRowHeight: CGFloat = 24
-    static let footerStackSpacing: CGFloat = 8
-    static let footerButtonsHeight: CGFloat = 18
+    static let popoverHeight: CGFloat = 300
+    static let popoverHorizontalPadding: CGFloat = 12
+    static let popoverPaddingTop: CGFloat = 10
+    static let popoverPaddingBottom: CGFloat = 8
+    static let popoverStackSpacing: CGFloat = 8
+    static let headerMinHeight: CGFloat = 32
+    static let providerSwitcherHeight: CGFloat = 24
+    static let meterRowHeight: CGFloat = 38
+    static let meterSpacing: CGFloat = 6
+    static let compactMeterRowHeight: CGFloat = 34
+    static let statusRowHeight: CGFloat = 20
+    static let footerStackSpacing: CGFloat = 6
+    static let footerButtonsHeight: CGFloat = 16
     static let footerDividerHeight: CGFloat = 1
     static let lowQuotaThreshold: Double = 25
-
-    static var switcherBlockHeight: CGFloat {
-        providerSwitcherHeight + accountRowSpacing + accountRowHeight
-    }
 
     static var footerHeight: CGFloat {
         statusRowHeight
@@ -51,17 +44,8 @@ enum Theme {
             + footerButtonsHeight
     }
 
-    /// Tight CodexBar-style height with reserved account + status slots.
-    static var popoverCompactHeight: CGFloat {
-        popoverPaddingTop
-            + headerMinHeight
-            + popoverStackSpacing
-            + switcherBlockHeight
-            + popoverStackSpacing
-            + meterStackHeight
-            + popoverStackSpacing
-            + footerHeight
-            + popoverPaddingBottom
+    static var popoverChromeSize: NSSize {
+        NSSize(width: popoverWidth, height: popoverHeight)
     }
 
     static var backgroundNSColor: NSColor {
@@ -76,10 +60,12 @@ enum Theme {
     static let settingsCardRadius: CGFloat = 11
     static let settingsPadding: CGFloat = 18
     static let settingsCardPadding: CGFloat = 16
-    static let settingsHitTarget: CGFloat = 28
+    static let settingsHitTarget: CGFloat = 30
+    static let settingsFieldHeight: CGFloat = 30
     static let settingsHairline = Color.primary.opacity(0.08)
     static let settingsCardFill = Color(nsColor: .controlBackgroundColor)
     static let settingsPageFill = Color(nsColor: .windowBackgroundColor)
+    static let settingsFieldFill = Color.primary.opacity(0.045)
 
     static func settingsTint(for provider: ProviderKind) -> Color {
         switch provider {

@@ -69,6 +69,25 @@ enum CursorAuth {
         return "WorkosCursorSessionToken=\(trimmed)"
     }
 
+    static func emailFromSessionCookie(_ cookie: String) -> String? {
+        for component in cookie.split(separator: ";") {
+            let pair = component.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            guard pair.count == 2 else { continue }
+            let name = pair[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard name == "WorkosCursorSessionToken" else { continue }
+            let encoded = pair[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = encoded.removingPercentEncoding ?? encoded
+            let token = value.components(separatedBy: "::").last ?? value
+            if let payload = JWT.payload(token) {
+                return CodexCLIAuth.email(from: payload)
+            }
+        }
+        if let payload = JWT.payload(cookie) {
+            return CodexCLIAuth.email(from: payload)
+        }
+        return nil
+    }
+
     static func readLocalAccessToken() -> String? {
         if FileManager.default.fileExists(atPath: fileSystemPath(defaultDBPath)),
            let token = readTokenFromSQLite(defaultDBPath),

@@ -146,8 +146,8 @@ enum QuotaWindowKind: String, Equatable {
         return nil
     }
 
-    /// Slot 1 stays Session (disabled “—” when there is no 5h window).
-    /// Slot 2 is Weekly, or Monthly when that is the only longer window.
+    /// Session is only returned when a real ≤12h window exists (omitted otherwise).
+    /// The longer slot is Weekly, or Monthly when that is the only longer window.
     /// A lone ChatGPT window that is not a real ≤12h session is Weekly (or Monthly).
     static func assignChatGPTSlots(_ items: [Classified]) -> (session: UsageWindow?, longer: UsageWindow?) {
         if items.count == 1, let only = items.first {
