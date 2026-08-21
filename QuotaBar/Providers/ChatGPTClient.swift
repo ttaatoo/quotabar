@@ -24,7 +24,76 @@ enum ChatGPTClient {
             return try parsePastedOrOfficial(pastedJSON, fetchedAt: now, source: .pastedJSON)
         }
 
-        throw QuotaError.notSignedIn("Add a chatgpt.com session cookie in Settings, or paste conversation_limit JSON.")
+        throw QuotaError.notSignedIn("Sign in to ChatGPT in Settings, or paste a session cookie / conversation_limit JSON.")
+    }
+
+    struct SessionInfo: Equatable {
+        var accessToken: String
+        var email: String?
+        var planName: String?
+    }
+
+    /// Validates a chatgpt.com cookie against `/api/auth/session`.
+    /// Success means a real `accessToken` — an empty `{}` session is not enough.
+    static func sessionInfo(cookie: String) async throws -> SessionInfo {
+        guard let normalized = normalizeCookie(cookie) else {
+            throw QuotaError.notSignedIn("ChatGPT session cookie is empty.")
+        }
+        let identity = try await fetchSession(cookie: normalized)
+        return SessionInfo(
+            accessToken: identity.accessToken,
+            email: identity.email,
+            planName: identity.planName
+        )
+    }
+
+    static func hasSessionToken(in cookies: [HTTPCookie]) -> Bool {
+        cookies.contains { cookie in
+            let name = cookie.name.lowercased()
+            return name.contains("session-token") || name == "oai-sc"
+        }
+    }
+
+    /// Cookie header for chatgpt.com / openai.com hosts (session token plus the rest).
+    static func cookieHeader(from cookies: [HTTPCookie]) -> String? {
+        let relevant = cookies.filter(isChatGPTRelatedCookie)
+        guard !relevant.isEmpty else { return nil }
+        let header = HTTPCookie.requestHeaderFields(with: relevant)["Cookie"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (header?.isEmpty == false) ? header : nil
+    }
+
+    static func isChatGPTRelatedCookie(_ cookie: HTTPCookie) -> Bool {
+        let raw = cookie.domain.lowercased()
+        let host = raw.hasPrefix(".") ? String(raw.dropFirst()) : raw
+        return host == "chatgpt.com"
+            || host.hasSuffix(".chatgpt.com")
+            || host == "chat.openai.com"
+            || host == "openai.com"
+            || host.hasSuffix(".openai.com")
+    }
+
+    static func isLikelyAuthURL(_ url: URL?) -> Bool {
+        guard let url, let host = url.host?.lowercased() else { return true }
+        if host.contains("accounts.google.com")
+            || host.contains("login.microsoftonline.com")
+            || host.contains("appleid.apple.com")
+            || host.contains("login.live.com") {
+            return true
+        }
+        let path = url.path.lowercased()
+        if host.contains("auth.openai.com") {
+            return !path.contains("callback") && !path.contains("success")
+        }
+        if host == "chatgpt.com" || host.hasSuffix(".chatgpt.com") || host == "chat.openai.com" {
+            return path.contains("/auth")
+                || path.contains("/login")
+                || path.contains("/log-in")
+                || path.contains("/sign-in")
+                || path.contains("/signup")
+                || path.contains("/sign-up")
+        }
+        return true
     }
 
     private static func fetchLive(cookie: String, now: Date) async throws -> UsageSnapshot {

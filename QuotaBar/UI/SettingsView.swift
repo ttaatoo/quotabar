@@ -3,8 +3,6 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var store: AppStore
 
-    @State private var isAddingAccount = false
-    @State private var addLabel = ""
     @State private var renameID: UUID?
     @State private var renameLabel = ""
     @State private var deleteID: UUID?
@@ -26,7 +24,7 @@ struct SettingsView: View {
             }
 
             Section("ChatGPT") {
-                Text(verbatim: "Each account has its own session cookie (__Secure-next-auth.session-token=… or a full Cookie header) and optional conversation_limit JSON from DevTools. Secrets stay in the Keychain, not in config.json. Cursor and GLM stay single-account. QuotaBar never invents percentages.")
+                Text(verbatim: "Add account opens a ChatGPT sign-in window. After you finish, QuotaBar reads the session cookie and uses your email as the label (you can rename it). Each add uses a fresh in-app browser so the next login is not already signed in. Cookie and conversation_limit JSON stay in the Keychain as an optional fallback. Cursor and GLM stay single-account. QuotaBar never invents percentages.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -41,7 +39,9 @@ struct SettingsView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(account.label)
                                     .font(.headline)
-                                if let email = account.email, !email.isEmpty {
+                                if let email = account.email,
+                                   !email.isEmpty,
+                                   email.caseInsensitiveCompare(account.label) != .orderedSame {
                                     Text(email)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
@@ -57,21 +57,22 @@ struct SettingsView: View {
                             }
                         }
 
-                        SecureField("Session / cookie", text: cookieBinding(account.id))
-                            .textContentType(.password)
-                        Text("Optional conversation_limit JSON")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        TextEditor(text: jsonBinding(account.id))
-                            .font(.system(.caption, design: .monospaced))
-                            .frame(minHeight: 72)
+                        DisclosureGroup("Advanced — cookie / JSON fallback") {
+                            SecureField("Session / cookie", text: cookieBinding(account.id))
+                                .textContentType(.password)
+                            Text("Optional conversation_limit JSON from DevTools when the live endpoint has no percentages.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            TextEditor(text: jsonBinding(account.id))
+                                .font(.system(.caption, design: .monospaced))
+                                .frame(minHeight: 72)
+                        }
                     }
                     .padding(.vertical, 4)
                 }
 
                 Button("Add account") {
-                    addLabel = store.nextChatGPTLabel()
-                    isAddingAccount = true
+                    ChatGPTLoginPresenter.shared.begin(store: store)
                 }
             }
 
@@ -130,15 +131,6 @@ struct SettingsView: View {
         .onDisappear {
             store.persistSecrets()
             store.persistSettings()
-        }
-        .alert("Add ChatGPT account", isPresented: $isAddingAccount) {
-            TextField("Label (work, personal, plus…)", text: $addLabel)
-            Button("Add") {
-                _ = store.addChatGPTAccount(label: addLabel)
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Give this account a name. You can paste its cookie and optional JSON after adding it.")
         }
         .alert("Rename account", isPresented: renamePresented) {
             TextField("Label", text: $renameLabel)
