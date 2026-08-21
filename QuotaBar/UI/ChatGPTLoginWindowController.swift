@@ -61,7 +61,7 @@ final class ChatGPTLoginWindowController: NSWindowController, NSWindowDelegate {
     private var lastProbedHeader: String?
     private var pollTimer: Timer?
 
-    private let defaultStatus = "Sign in to ChatGPT. QuotaBar saves the session after you finish — not when this page first loads."
+    private let defaultStatus = "QuotaBar uses ~/.codex/auth.json from `codex login` the same way CodexBar does. Sign in here as a cookie fallback for that same usage API."
 
     var isVisible: Bool { window?.isVisible == true }
 

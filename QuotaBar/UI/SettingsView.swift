@@ -25,7 +25,7 @@ struct SettingsView: View {
             }
 
             Section("ChatGPT") {
-                Text("Add account opens a fresh ChatGPT sign-in window. QuotaBar stores the session cookie in the Keychain and uses your email as the label.")
+                Text("QuotaBar uses the same Codex OAuth file CodexBar uses (~/.codex/auth.json from `codex login`). The in-app ChatGPT window is a cookie fallback that now hits that same usage API.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -69,7 +69,7 @@ struct SettingsView: View {
                         DisclosureGroup("Advanced — cookie / JSON fallback") {
                             SecureField("Session / cookie", text: cookieBinding(account.id))
                                 .textContentType(.password)
-                            Text("Optional conversation_limit JSON from DevTools when the live endpoint has no percentages.")
+                            Text("Optional pasted usage JSON (wham/usage or conversation_limit) when the live API has no percentages. Numbers are never invented.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             jsonEditor(for: account.id)

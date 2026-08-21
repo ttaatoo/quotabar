@@ -22,7 +22,7 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable, Hashable {
         case .cursor:
             return "Sign in to Cursor.app, or paste a WorkosCursorSessionToken cookie in Settings."
         case .chatgpt:
-            return "Add a ChatGPT account in Settings and sign in in the login window, or paste a session cookie / conversation_limit JSON."
+            return "Run `codex login` (QuotaBar reads ~/.codex/auth.json like CodexBar), add a ChatGPT account in Settings, or paste a session cookie / usage JSON."
         case .glm:
             return "Paste a z.ai / BigModel API key in Settings, or set Z_AI_API_KEY."
         }
