@@ -1,20 +1,24 @@
 import AppKit
 
 enum StatusItemRenderer {
-    static func image(text: String, warning: Bool) -> NSImage {
-        let height: CGFloat = 22
-        let horizontalPad: CGFloat = 7
-        let logoWidth: CGFloat = 11
-        let gap: CGFloat = 5
+    private static let height: CGFloat = 22
+    private static let horizontalPad: CGFloat = 7
+    private static let logoWidth: CGFloat = 11
+    private static let gap: CGFloat = 5
+    private static let labelFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
 
+    /// Fixed menu-bar slot and pill width, sized once for the widest label (`100%`).
+    static let itemWidth: CGFloat = measuredItemWidth()
+
+    static func image(text: String, warning: Bool) -> NSImage {
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+            .font: labelFont,
             .foregroundColor: warning
                 ? NSColor(calibratedRed: 1, green: 0.48, blue: 0.10, alpha: 1)
                 : NSColor.white
         ]
         let textSize = (text as NSString).size(withAttributes: attributes)
-        let width = ceil(horizontalPad + logoWidth + gap + textSize.width + horizontalPad)
+        let width = itemWidth
 
         let image = NSImage(size: NSSize(width: width, height: height), flipped: false) { rect in
             let pill = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 1.5), xRadius: 7, yRadius: 7)
@@ -26,8 +30,9 @@ enum StatusItemRenderer {
 
             drawLogo(in: NSRect(x: horizontalPad, y: (rect.height - 11) / 2, width: 11, height: 11))
 
+            let textSlotMaxX = width - horizontalPad
             let textOrigin = NSPoint(
-                x: horizontalPad + logoWidth + gap,
+                x: textSlotMaxX - textSize.width,
                 y: (rect.height - textSize.height) / 2 - 0.5
             )
             (text as NSString).draw(at: textOrigin, withAttributes: attributes)
@@ -35,6 +40,11 @@ enum StatusItemRenderer {
         }
         image.isTemplate = false
         return image
+    }
+
+    private static func measuredItemWidth() -> CGFloat {
+        let textWidth = ("100%" as NSString).size(withAttributes: [.font: labelFont]).width
+        return ceil(horizontalPad + logoWidth + gap + textWidth + horizontalPad)
     }
 
     private static func drawLogo(in rect: NSRect) {

@@ -24,7 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setupStatusItem() {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: StatusItemRenderer.itemWidth)
         if let button = statusItem.button {
             button.imagePosition = .imageOnly
             button.target = self
