@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 cask "quotabar" do
-  version "0.0.9"
+  version "0.0.10"
   sha256 :no_check
 
   url "https://github.com/ttaatoo/quotabar/releases/download/v#{version}/QuotaBar.zip"
