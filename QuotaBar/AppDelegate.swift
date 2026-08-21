@@ -40,12 +40,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         popover.animates = false
         popover.appearance = NSAppearance(named: .darkAqua)
-        let hosting = NSHostingController(rootView: PopoverView(store: store))
-        hosting.sizingOptions = []
-        hosting.preferredContentSize = Theme.popoverChromeSize
-        hosting.view.frame = NSRect(origin: .zero, size: Theme.popoverChromeSize)
-        popover.contentViewController = hosting
-        // Frozen after first setup. Tab switch and objectWillChange must not rewrite contentSize.
+        popover.contentViewController = FrozenPopoverController(store: store)
+        // Frozen after first setup. Tab switch, refresh, and objectWillChange
+        // must not rewrite contentSize and must not call show() again.
         popover.contentSize = Theme.popoverChromeSize
         self.popover = popover
         paintPopoverChrome()
@@ -65,14 +62,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func paintPopoverChrome() {
         guard let view = popover.contentViewController?.view else { return }
         let color = Theme.backgroundNSColor.cgColor
-        view.appearance = NSAppearance(named: .darkAqua)
-        view.wantsLayer = true
-        view.layer?.backgroundColor = color
-        if let parent = view.superview {
-            parent.appearance = NSAppearance(named: .darkAqua)
-            parent.wantsLayer = true
-            parent.layer?.backgroundColor = color
+        func paint(_ target: NSView?) {
+            guard let target else { return }
+            target.appearance = NSAppearance(named: .darkAqua)
+            target.wantsLayer = true
+            target.layer?.backgroundColor = color
         }
+        paint(view)
+        paint(view.superview)
+        view.subviews.forEach { paint($0) }
     }
 
     private func renderStatusItem() {

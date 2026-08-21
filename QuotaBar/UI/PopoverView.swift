@@ -61,49 +61,43 @@ struct PopoverView: View {
         .frame(minHeight: Theme.headerMinHeight, alignment: .top)
     }
 
-    @ViewBuilder
+    /// Same tree for 0 / 1 / N cards. A ScrollView → hugging stack is always
+    /// present so tab switches cannot change NSHostingView.fittingSize.
+    /// Cards hug their content; leftover space is the popover background.
     private var cards: some View {
+        let rows = cardRows
+        return ScrollView(.vertical, showsIndicators: rows.count > 2) {
+            VStack(spacing: 6) {
+                ForEach(rows) { row in
+                    AccountCard(
+                        row: row,
+                        mode: store.settings.displayMode,
+                        now: store.now,
+                        onRetry: { Task { await store.refreshSelected() } },
+                        onOpenSettings: store.openSettings
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .top)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .clipped()
+    }
+
+    private var cardRows: [AccountCardRow] {
         let rows = store.accountCards
         if rows.isEmpty {
-            AccountCard(
-                row: AccountCardRow(
+            return [
+                AccountCardRow(
                     id: store.selected.rawValue,
                     email: nil,
                     fallbackTitle: "Not signed in",
                     state: store.selectedState
-                ),
-                mode: store.settings.displayMode,
-                now: store.now,
-                fillsBody: true,
-                onRetry: { Task { await store.refreshSelected() } },
-                onOpenSettings: store.openSettings
-            )
-        } else if rows.count == 1, let row = rows.first {
-            AccountCard(
-                row: row,
-                mode: store.settings.displayMode,
-                now: store.now,
-                fillsBody: true,
-                onRetry: { Task { await store.refreshSelected() } },
-                onOpenSettings: store.openSettings
-            )
-        } else {
-            ScrollView(.vertical, showsIndicators: rows.count > 2) {
-                VStack(spacing: 6) {
-                    ForEach(rows) { row in
-                        AccountCard(
-                            row: row,
-                            mode: store.settings.displayMode,
-                            now: store.now,
-                            fillsBody: false,
-                            onRetry: { Task { await store.refreshSelected() } },
-                            onOpenSettings: store.openSettings
-                        )
-                    }
-                }
-            }
-            .scrollBounceBehavior(.basedOnSize)
+                )
+            ]
         }
+        return rows
     }
 
     private var footer: some View {
@@ -163,7 +157,6 @@ struct AccountCard: View {
     let row: AccountCardRow
     let mode: DisplayMode
     let now: Date
-    var fillsBody: Bool = false
     let onRetry: () -> Void
     let onOpenSettings: () -> Void
 
@@ -188,22 +181,22 @@ struct AccountCard: View {
             switch row.state {
             case .ready(let snapshot):
                 let windows = [snapshot.session, snapshot.weekly].compactMap { $0 }
-                if windows.isEmpty {
-                    Text("No usage windows")
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(Theme.secondary)
-                } else {
-                    VStack(spacing: Theme.meterSpacing) {
+                VStack(alignment: .leading, spacing: Theme.meterSpacing) {
+                    if windows.isEmpty {
+                        Text("No usage windows")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(Theme.secondary)
+                    } else {
                         ForEach(windows, id: \.title) { window in
                             UsageMeterRow(window: window, mode: mode, now: now, compact: true)
                         }
                     }
-                }
-                if let extra = snapshot.extraFooter, !extra.isEmpty {
-                    Text(extra)
-                        .font(.system(size: 10))
-                        .foregroundStyle(Theme.tertiary)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
+                    if let extra = snapshot.extraFooter, !extra.isEmpty {
+                        Text(extra)
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.tertiary)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
                 }
             case .loading, .idle:
                 Text("Updating…")
@@ -226,7 +219,8 @@ struct AccountCard: View {
             }
         }
         .padding(Theme.accountCardPadding)
-        .frame(maxWidth: .infinity, maxHeight: fillsBody ? .infinity : nil, alignment: .top)
+        .frame(maxWidth: .infinity, alignment: .top)
+        .fixedSize(horizontal: false, vertical: true)
         .background(
             RoundedRectangle(cornerRadius: Theme.accountCardRadius, style: .continuous)
                 .fill(Theme.elevated)

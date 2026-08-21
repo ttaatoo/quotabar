@@ -20,9 +20,10 @@ enum Theme {
     static let logoGreen = Color(red: 0.24, green: 0.86, blue: 0.59)
     static let logoAmber = Color(red: 0.95, green: 0.62, blue: 0.22)
 
-    /// Frozen compact chrome. Do not rewrite NSPopover.contentSize after the first setup.
+    /// Frozen compact chrome. Constant across every provider and account count.
+    /// Do not rewrite NSPopover.contentSize after the first setup.
     static let popoverWidth: CGFloat = 312
-    static let popoverHeight: CGFloat = 232
+    static let popoverHeight: CGFloat = 200
     static let popoverHorizontalPadding: CGFloat = 10
     static let popoverPaddingTop: CGFloat = 8
     static let popoverPaddingBottom: CGFloat = 8
@@ -30,10 +31,10 @@ enum Theme {
     static let headerMinHeight: CGFloat = 28
     static let providerSwitcherHeight: CGFloat = 22
     static let meterRowHeight: CGFloat = 34
-    static let meterSpacing: CGFloat = 4
-    static let compactMeterRowHeight: CGFloat = 30
-    static let accountCardPadding: CGFloat = 8
-    static let accountCardSpacing: CGFloat = 5
+    static let meterSpacing: CGFloat = 3
+    static let compactMeterRowHeight: CGFloat = 26
+    static let accountCardPadding: CGFloat = 6
+    static let accountCardSpacing: CGFloat = 3
     static let accountCardRadius: CGFloat = 8
     static let footerStackSpacing: CGFloat = 5
     static let footerButtonsHeight: CGFloat = 16
