@@ -153,16 +153,8 @@ final class AppStore: ObservableObject {
         if settings.chatgptAccounts.isEmpty {
             return chatGPTState(for: nil)
         }
-        let visible = visibleChatGPTAccounts
-        if visible.isEmpty {
-            return .signedOut(ProviderKind.chatgpt.signInHint)
-        }
-        if let selected = settings.selectedChatGPTAccountId,
-           visible.contains(where: { $0.id == selected }) {
-            return chatgptStates[selected] ?? .idle
-        }
-        if let signedIn = visible.first(where: { isSignedInChatGPT($0.id) }) {
-            return chatgptStates[signedIn.id] ?? .idle
+        if let id = activeChatGPTAccountId {
+            return chatgptStates[id] ?? .idle
         }
         return .signedOut(ProviderKind.chatgpt.signInHint)
     }
