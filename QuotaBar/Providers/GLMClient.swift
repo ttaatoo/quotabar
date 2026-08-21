@@ -6,7 +6,9 @@ enum GLMClient {
             throw QuotaError.notSignedIn("Add a z.ai / BigModel API key in Settings, ~/.config/quotabar/config.json, or Z_AI_API_KEY.")
         }
 
-        let url = region.host.appendingPathComponent("api/monitor/usage/quota/limit")
+        guard let url = URL(string: region.hostString + "/api/monitor/usage/quota/limit") else {
+            throw QuotaError.schema("Invalid GLM quota URL for \(region.hostString).")
+        }
         let (data, response) = try await HTTPClient.get(
             url: url,
             headers: [
@@ -14,7 +16,7 @@ enum GLMClient {
                 "Accept": "application/json"
             ]
         )
-        try HTTPClient.requireOK(response, data: data, host: region.host.host ?? "z.ai")
+        try HTTPClient.requireOK(response, data: data, host: url.host ?? "z.ai")
         let object = try JSONWalk.object(from: data)
         return try parse(object, fetchedAt: now)
     }
@@ -66,13 +68,12 @@ enum GLMClient {
             return value
         }
         let weekly: UsageWindow? = {
-            if windows.count >= 2 {
-                var value = windows.last!.window
+            if windows.count >= 2, var value = windows.last?.window {
                 value.title = "Weekly"
                 return value
             }
-            if windows[0].seconds >= 3 * 86_400 {
-                var value = windows[0].window
+            if let first = windows.first, first.seconds >= 3 * 86_400 {
+                var value = first.window
                 value.title = "Weekly"
                 return value
             }

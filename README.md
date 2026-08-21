@@ -1,8 +1,32 @@
 # QuotaBar
 
-A menu-bar-only macOS 14+ utility that shows remaining **Cursor**, **ChatGPT**, and **GLM** (z.ai / BigModel coding plan) subscription quota. One dark pill in the status bar, one compact popover. No Dock icon, no other providers, no telemetry.
+A menu-bar-only macOS 14+ utility (version **0.0.1**) that shows remaining **Cursor**, **ChatGPT**, and **GLM** (z.ai / BigModel coding plan) subscription quota. One dark pill in the status bar, one compact popover. No Dock icon, no other providers, no telemetry.
 
 QuotaBar is an independent implementation. It talks to the same unofficial usage endpoints those products’ own dashboards already call. Those endpoints can change or break without notice.
+
+## Install
+
+Ad-hoc signed (no Apple Developer ID). On your Mac:
+
+```bash
+brew tap ttaatoo/quotabar https://github.com/ttaatoo/quotabar
+brew install --formula --HEAD ttaatoo/quotabar/quotabar
+# after the v0.0.1 zip is published:
+brew install --cask --no-quarantine ttaatoo/quotabar/quotabar
+```
+
+`--HEAD` builds from `main` and works immediately after this repo is merged. `--no-quarantine` is required for the ad-hoc signed cask.
+
+Then:
+
+```bash
+# formula prefix; skip if you used the cask
+xattr -dr com.apple.quarantine "$(brew --prefix quotabar)/QuotaBar.app"
+```
+
+If Gatekeeper still blocks it: **System Settings → Privacy & Security → Open Anyway**.
+
+Optional: `ln -sf "$(brew --prefix quotabar)/QuotaBar.app" /Applications/QuotaBar.app`
 
 ## What you get
 
@@ -15,7 +39,7 @@ If a provider is not signed in, you see a “Sign in / add key” empty state �
 ## Requirements
 
 - macOS 14 Sonoma or later
-- Xcode 15.4+ (Swift 5.9+)
+- Xcode 15.4+ (Swift 5.9+) to build from source / `brew install --HEAD`
 
 ## Build
 
@@ -31,17 +55,20 @@ Or from the command line:
 
 ```bash
 xcodebuild -project QuotaBar.xcodeproj -scheme QuotaBar -configuration Release \
+  MARKETING_VERSION=0.0.1 CURRENT_PROJECT_VERSION=0.0.1 \
   CODE_SIGN_IDENTITY="-" CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=NO build
 ```
 
-Ad-hoc signed app + zip:
+Ad-hoc signed app + zip (also used by the Homebrew formula and the `v*` release workflow):
 
 ```bash
 chmod +x scripts/package.sh
 ./scripts/package.sh
 ```
 
-That writes `dist/QuotaBar.app` and `dist/QuotaBar.zip`, then runs `codesign --force --deep --sign -`.
+That writes `dist/QuotaBar.app` and `dist/QuotaBar.zip` at version 0.0.1, then runs `codesign --force --deep --sign -`.
+
+Pushing a `v*` tag (or running the Release workflow) uploads `QuotaBar.zip` to a GitHub Release.
 
 ## First-run Gatekeeper
 

@@ -70,12 +70,12 @@ enum CursorAuth {
     }
 
     static func readLocalAccessToken() -> String? {
-        if FileManager.default.fileExists(atPath: defaultDBPath.path),
+        if FileManager.default.fileExists(atPath: fileSystemPath(defaultDBPath)),
            let token = readTokenFromSQLite(defaultDBPath),
            !token.isEmpty {
             return token
         }
-        for url in agentAuthPaths where FileManager.default.fileExists(atPath: url.path) {
+        for url in agentAuthPaths where FileManager.default.fileExists(atPath: fileSystemPath(url)) {
             if let token = readAgentToken(url), !token.isEmpty {
                 return token
             }
@@ -99,9 +99,9 @@ enum CursorAuth {
             let dest = tempDir.appendingPathComponent("state.vscdb")
             try FileManager.default.copyItem(at: url, to: dest)
             for suffix in ["-wal", "-shm"] {
-                let side = URL(fileURLWithPath: url.path + suffix)
-                if FileManager.default.fileExists(atPath: side.path) {
-                    try FileManager.default.copyItem(at: side, to: URL(fileURLWithPath: dest.path + suffix))
+                let side = URL(fileURLWithPath: fileSystemPath(url) + suffix)
+                if FileManager.default.fileExists(atPath: fileSystemPath(side)) {
+                    try FileManager.default.copyItem(at: side, to: URL(fileURLWithPath: fileSystemPath(dest) + suffix))
                 }
             }
             defer { try? FileManager.default.removeItem(at: tempDir) }
@@ -111,10 +111,18 @@ enum CursorAuth {
         }
     }
 
+    private static func fileSystemPath(_ url: URL) -> String {
+        url.path(percentEncoded: false)
+    }
+
     private static func queryAccessToken(at url: URL) -> String? {
         var db: OpaquePointer?
         let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
-        guard sqlite3_open_v2(url.path, &db, flags, nil) == SQLITE_OK, let db else {
+        let status = url.withUnsafeFileSystemRepresentation { cPath -> Int32 in
+            guard let cPath else { return SQLITE_CANTOPEN }
+            return sqlite3_open_v2(cPath, &db, flags, nil)
+        }
+        guard status == SQLITE_OK, let db else {
             if db != nil { sqlite3_close(db) }
             return nil
         }

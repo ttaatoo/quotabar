@@ -68,7 +68,7 @@ struct SettingsView: View {
             }
 
             Section("About") {
-                LabeledContent("Version", value: "1.0.0")
+                LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.1")
                 Text("Unofficial usage endpoints can change or break without notice. QuotaBar stores secrets in the Keychain and never phones home.")
                     .font(.caption)
                     .foregroundStyle(.secondary)

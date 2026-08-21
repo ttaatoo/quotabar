@@ -56,10 +56,10 @@ enum GLMRegion: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    var host: URL {
+    var hostString: String {
         switch self {
-        case .global: return URL(string: "https://api.z.ai")!
-        case .china: return URL(string: "https://open.bigmodel.cn")!
+        case .global: return "https://api.z.ai"
+        case .china: return "https://open.bigmodel.cn"
         }
     }
 }
