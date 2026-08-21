@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum Theme {
@@ -18,5 +19,16 @@ enum Theme {
     static let logoGreen = Color(red: 0.24, green: 0.86, blue: 0.59)
 
     static let popoverWidth: CGFloat = 312
+    /// Tight CodexBar-style starting height (header + switcher + two meters + footer).
+    static let popoverCompactHeight: CGFloat = 280
+    static let meterRowHeight: CGFloat = 48
+    static let meterSpacing: CGFloat = 14
+    static var meterStackHeight: CGFloat { (meterRowHeight * 2) + meterSpacing }
+    static let accountRowHeight: CGFloat = 22
+    static let statusRowHeight: CGFloat = 16
     static let lowQuotaThreshold: Double = 25
+
+    static var backgroundNSColor: NSColor {
+        NSColor(srgbRed: 0.105, green: 0.105, blue: 0.112, alpha: 1)
+    }
 }
