@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
 cask "quotabar" do
-  version "0.0.6"
+  version "0.0.7"
   sha256 :no_check
 
   url "https://github.com/ttaatoo/quotabar/releases/download/v#{version}/QuotaBar.zip"
   name "QuotaBar"
-  desc "Menu bar quota for Cursor, ChatGPT, and GLM"
+  desc "Menu bar quota for Cursor, ChatGPT, GLM, and Grok"
   homepage "https://github.com/ttaatoo/quotabar"
 
   depends_on macos: :sonoma

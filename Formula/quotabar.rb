@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 class Quotabar < Formula
-  desc "macOS menu bar quota for Cursor, ChatGPT, and GLM"
+  desc "macOS menu bar quota for Cursor, ChatGPT, GLM, and Grok"
   homepage "https://github.com/ttaatoo/quotabar"
-  # Fill sha256 with the real digest after the v0.0.6 tag exists.
+  # Fill sha256 with the real digest after the v0.0.7 tag exists.
   # Until then, install from git: brew install --HEAD ttaatoo/quotabar/quotabar
-  url "https://github.com/ttaatoo/quotabar/archive/refs/tags/v0.0.6.tar.gz"
+  url "https://github.com/ttaatoo/quotabar/archive/refs/tags/v0.0.7.tar.gz"
   sha256 :no_check
   license "MIT"
   head "https://github.com/ttaatoo/quotabar.git", branch: "main"
