@@ -119,10 +119,10 @@ enum Percent {
             return (clamp(((limit - used) / limit) * 100), clamp((used / limit) * 100))
         }
         if let used {
-            return (remaining(used: used), clamp(used))
+            return (Percent.remaining(used: used), clamp(used))
         }
         if let remaining {
-            return (clamp(remaining), remaining(used: remaining))
+            return (clamp(remaining), Percent.remaining(used: remaining))
         }
         return nil
     }

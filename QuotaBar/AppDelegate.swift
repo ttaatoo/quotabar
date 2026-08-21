@@ -102,7 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startEventMonitor() {
         stopEventMonitor()
         eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [self] in
                 guard let self, self.popover.isShown else { return }
                 self.popover.performClose(nil)
             }
