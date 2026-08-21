@@ -1,0 +1,33 @@
+# Xcode
+DerivedData/
+.derived/
+build/
+dist/
+*.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM
+*.dSYM.zip
+
+# Swift / SPM
+.swiftpm/
+.build/
+Package.resolved
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+
+# Secrets — never commit
+.env
+.env.*
+config.json
+*.pem
+*.p12
+*.key
