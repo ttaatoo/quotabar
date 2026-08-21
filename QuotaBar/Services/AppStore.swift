@@ -39,9 +39,26 @@ final class AppStore: ObservableObject {
 
     var selectedState: ProviderLoadState {
         if selected == .chatgpt {
-            return aggregatedChatGPTState
+            return activeChatGPTState
         }
         return states[selected] ?? .idle
+    }
+
+    /// Card in the ChatGPT tab that is active for the menu bar.
+    /// Implicit / empty ChatGPT (no saved accounts) has a single card that is active.
+    func isActiveChatGPTCard(_ cardID: String) -> Bool {
+        guard selected == .chatgpt else { return false }
+        if settings.chatgptAccounts.isEmpty {
+            return true
+        }
+        guard let active = activeChatGPTAccountId else { return false }
+        return cardID == active.uuidString
+    }
+
+    func activateChatGPTCard(_ cardID: String) {
+        guard selected == .chatgpt else { return }
+        guard let id = UUID(uuidString: cardID) else { return }
+        selectChatGPTAccount(id)
     }
 
     var cursorEmail: String? {
@@ -116,48 +133,58 @@ final class AppStore: ObservableObject {
         }
     }
 
-    private var aggregatedChatGPTState: ProviderLoadState {
+    /// Visible ChatGPT account the menu bar follows. Stored selection wins when
+    /// it is still in the list; otherwise the first signed-in remaining account.
+    var activeChatGPTAccountId: UUID? {
+        if settings.chatgptAccounts.isEmpty { return nil }
+        let visible = visibleChatGPTAccounts
+        if let selected = settings.selectedChatGPTAccountId,
+           visible.contains(where: { $0.id == selected }) {
+            return selected
+        }
+        if let signedIn = visible.first(where: { isSignedInChatGPT($0.id) }) {
+            return signedIn.id
+        }
+        return nil
+    }
+
+    /// Menu bar uses this account only — never the min across every card.
+    private var activeChatGPTState: ProviderLoadState {
         if settings.chatgptAccounts.isEmpty {
             return chatGPTState(for: nil)
         }
-        let rows = visibleChatGPTAccounts.map { chatgptStates[$0.id] ?? .idle }
-        if rows.isEmpty {
+        let visible = visibleChatGPTAccounts
+        if visible.isEmpty {
             return .signedOut(ProviderKind.chatgpt.signInHint)
         }
-        let ready = rows.compactMap { state -> UsageSnapshot? in
-            if case .ready(let snapshot) = state { return snapshot }
-            return nil
+        if let selected = settings.selectedChatGPTAccountId,
+           visible.contains(where: { $0.id == selected }) {
+            return chatgptStates[selected] ?? .idle
         }
-        if let combined = combineChatGPTSnapshots(ready) {
-            return .ready(combined)
+        if let signedIn = visible.first(where: { isSignedInChatGPT($0.id) }) {
+            return chatgptStates[signedIn.id] ?? .idle
         }
-        if rows.contains(where: { if case .loading = $0 { return true }; return false }) {
-            return .loading
-        }
-        if rows.allSatisfy(\.isSignedOut) {
-            return .signedOut(ProviderKind.chatgpt.signInHint)
-        }
-        if let failure = rows.compactMap({ state -> String? in
-            if case .failure(let message) = state { return message }
-            return nil
-        }).first {
-            return .failure(failure)
-        }
-        return .idle
+        return .signedOut(ProviderKind.chatgpt.signInHint)
     }
 
-    private func combineChatGPTSnapshots(_ snapshots: [UsageSnapshot]) -> UsageSnapshot? {
-        guard let first = snapshots.first else { return nil }
-        if snapshots.count == 1 { return first }
-        let remaining = snapshots.compactMap(\.mostConstrainedRemaining)
-        guard let lowest = remaining.min(),
-              let chosen = snapshots.first(where: { $0.mostConstrainedRemaining == lowest })
-        else { return first }
-        var combined = chosen
-        combined.accountEmail = nil
-        combined.planName = nil
-        combined.extraFooter = nil
-        return combined
+    private func isSignedInChatGPT(_ id: UUID) -> Bool {
+        if case .ready = chatgptStates[id] { return true }
+        return false
+    }
+
+    private func signedInChatGPTAccountIDs() -> [UUID] {
+        visibleChatGPTAccounts.compactMap { account in
+            isSignedInChatGPT(account.id) ? account.id : nil
+        }
+    }
+
+    /// Persist a fallback when the active id was deleted or is no longer visible.
+    private func ensureActiveChatGPTAccount() {
+        let before = settings.selectedChatGPTAccountId
+        settings.resolveSelectedChatGPTAccount(preferring: signedInChatGPTAccountIDs())
+        if settings.selectedChatGPTAccountId != before {
+            persistSettings()
+        }
     }
 
     var visibleProviders: [ProviderKind] {
@@ -209,6 +236,7 @@ final class AppStore: ObservableObject {
 
     func selectChatGPTAccount(_ id: UUID) {
         guard settings.chatgptAccounts.contains(where: { $0.id == id }) else { return }
+        guard settings.selectedChatGPTAccountId != id else { return }
         settings.selectedChatGPTAccountId = id
         persistSettings()
     }
@@ -352,8 +380,8 @@ final class AppStore: ObservableObject {
             CodexCLIAuth.removeManagedHomeIfSafe(homePath)
         }
         if settings.selectedChatGPTAccountId == id {
-            settings.selectedChatGPTAccountId = settings.visibleChatGPTAccounts.first?.id
-                ?? settings.chatgptAccounts.first?.id
+            settings.selectedChatGPTAccountId = nil
+            settings.resolveSelectedChatGPTAccount(preferring: signedInChatGPTAccountIDs())
         }
         persistSettings()
     }
@@ -492,6 +520,7 @@ final class AppStore: ObservableObject {
         for account in accounts {
             await refreshChatGPTAccount(account.id, userInitiated: userInitiated)
         }
+        ensureActiveChatGPTAccount()
     }
 
     private func refreshChatGPTAccount(_ id: UUID, userInitiated: Bool) async {

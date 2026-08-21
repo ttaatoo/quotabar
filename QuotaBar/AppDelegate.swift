@@ -81,10 +81,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         switch store.selectedState {
         case .ready(let snapshot):
-            if let remaining = snapshot.mostConstrainedRemaining {
+            let remaining: Double?
+            let isLow: Bool
+            if store.selected == .chatgpt {
+                remaining = snapshot.chatGPTMenuRemaining
+                isLow = snapshot.isChatGPTMenuLow
+            } else {
+                remaining = snapshot.mostConstrainedRemaining
+                isLow = snapshot.isLow
+            }
+            if let remaining {
                 let displayed = mode == .remaining ? remaining : max(0, 100 - remaining)
                 text = "\(Int(displayed.rounded()))%"
-                warning = snapshot.isLow
+                warning = isLow
             } else {
                 text = "—"
                 warning = false

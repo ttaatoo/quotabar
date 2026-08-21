@@ -66,6 +66,7 @@ struct AppSettings: Equatable, Codable {
     var previewFixtures: Bool
     var launchAtLogin: Bool
     var chatgptAccounts: [ChatGPTAccount]
+    /// ChatGPT account whose remaining % is shown in the menu bar.
     var selectedChatGPTAccountId: UUID?
     /// One-shot so existing 0.0.6 configs gain Grok without re-enabling it after the user hides it.
     var didIntroduceGrok: Bool
@@ -130,8 +131,19 @@ struct AppSettings: Equatable, Codable {
             }
         }
 
+        resolveSelectedChatGPTAccount()
+    }
+
+    /// Keeps `selectedChatGPTAccountId` on a still-visible account.
+    /// `preferred` is typically signed-in IDs in display order, used only when
+    /// the stored selection is missing (deleted, disabled, or never set).
+    mutating func resolveSelectedChatGPTAccount(preferring preferred: [UUID] = []) {
         let selectable = visibleChatGPTAccounts
         if let selected = selectedChatGPTAccountId, selectable.contains(where: { $0.id == selected }) {
+            return
+        }
+        if let match = selectable.first(where: { preferred.contains($0.id) }) {
+            selectedChatGPTAccountId = match.id
             return
         }
         selectedChatGPTAccountId = selectable.first?.id
