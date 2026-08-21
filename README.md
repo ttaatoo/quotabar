@@ -1,6 +1,6 @@
 # QuotaBar
 
-A menu-bar-only macOS 14+ utility (version **0.0.1**) that shows remaining **Cursor**, **ChatGPT**, and **GLM** (z.ai / BigModel coding plan) subscription quota. One dark pill in the status bar, one compact popover. No Dock icon, no other providers, no telemetry.
+A menu-bar-only macOS 14+ utility (version **0.0.2**) that shows remaining **Cursor**, **ChatGPT**, and **GLM** (z.ai / BigModel coding plan) subscription quota. One dark pill in the status bar, one compact popover. No Dock icon, no other providers, no telemetry.
 
 QuotaBar is an independent implementation. It talks to the same unofficial usage endpoints those products’ own dashboards already call. Those endpoints can change or break without notice.
 
@@ -11,7 +11,7 @@ Ad-hoc signed (no Apple Developer ID). On your Mac:
 ```bash
 brew tap ttaatoo/quotabar https://github.com/ttaatoo/quotabar
 brew install --formula --HEAD ttaatoo/quotabar/quotabar
-# after the v0.0.1 zip is published:
+# after the v0.0.2 zip is published:
 brew install --cask --no-quarantine ttaatoo/quotabar/quotabar
 ```
 
@@ -55,7 +55,7 @@ Or from the command line:
 
 ```bash
 xcodebuild -project QuotaBar.xcodeproj -scheme QuotaBar -configuration Release \
-  MARKETING_VERSION=0.0.1 CURRENT_PROJECT_VERSION=0.0.1 \
+  MARKETING_VERSION=0.0.2 CURRENT_PROJECT_VERSION=0.0.2 \
   CODE_SIGN_IDENTITY="-" CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=NO build
 ```
 
@@ -66,7 +66,7 @@ chmod +x scripts/package.sh
 ./scripts/package.sh
 ```
 
-That writes `dist/QuotaBar.app` and `dist/QuotaBar.zip` at version 0.0.1, then runs `codesign --force --deep --sign -`.
+That writes `dist/QuotaBar.app` and `dist/QuotaBar.zip` at version 0.0.2, then runs `codesign --force --deep --sign -`.
 
 Pushing a `v*` tag (or running the Release workflow) uploads `QuotaBar.zip` to a GitHub Release.
 
