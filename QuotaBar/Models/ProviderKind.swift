@@ -17,6 +17,30 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable, Hashable {
 
     var shortTitle: String { title }
 
+    /// Reserved popover slot 1 when that window is absent.
+    var primaryWindowTitle: String {
+        switch self {
+        case .cursor: return "Cursor Models"
+        case .chatgpt, .glm: return "Session"
+        }
+    }
+
+    /// Reserved popover slot 2 when that window is absent.
+    var secondaryWindowTitle: String {
+        switch self {
+        case .cursor: return "Other Models"
+        case .chatgpt, .glm: return "Weekly"
+        }
+    }
+
+    var settingsSymbol: String {
+        switch self {
+        case .cursor: return "square.grid.2x2"
+        case .chatgpt: return "text.bubble"
+        case .glm: return "hexagon"
+        }
+    }
+
     var signInHint: String {
         switch self {
         case .cursor:

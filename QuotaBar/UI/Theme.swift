@@ -67,4 +67,25 @@ enum Theme {
     static var backgroundNSColor: NSColor {
         NSColor(srgbRed: 0.105, green: 0.105, blue: 0.112, alpha: 1)
     }
+
+    // MARK: Settings (follows system appearance)
+
+    static let settingsColumnWidth: CGFloat = 520
+    static let settingsMinWidth: CGFloat = 480
+    static let settingsMinHeight: CGFloat = 560
+    static let settingsCardRadius: CGFloat = 11
+    static let settingsPadding: CGFloat = 18
+    static let settingsCardPadding: CGFloat = 16
+    static let settingsHitTarget: CGFloat = 28
+    static let settingsHairline = Color.primary.opacity(0.08)
+    static let settingsCardFill = Color(nsColor: .controlBackgroundColor)
+    static let settingsPageFill = Color(nsColor: .windowBackgroundColor)
+
+    static func settingsTint(for provider: ProviderKind) -> Color {
+        switch provider {
+        case .cursor: return logoBlue
+        case .chatgpt: return logoPurple
+        case .glm: return logoGreen
+        }
+    }
 }

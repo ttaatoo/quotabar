@@ -107,16 +107,17 @@ struct PopoverView: View {
     }
 
     private var content: some View {
-        VStack(spacing: Theme.meterSpacing) {
+        let snapshot = store.selectedState.snapshot
+        return VStack(spacing: Theme.meterSpacing) {
             UsageMeterRow(
-                title: "Session",
-                window: store.selectedState.snapshot?.session,
+                title: snapshot?.session?.title ?? store.selected.primaryWindowTitle,
+                window: snapshot?.session,
                 mode: store.settings.displayMode,
                 now: store.now
             )
             UsageMeterRow(
-                title: "Weekly",
-                window: store.selectedState.snapshot?.weekly,
+                title: snapshot?.weekly?.title ?? store.selected.secondaryWindowTitle,
+                window: snapshot?.weekly,
                 mode: store.settings.displayMode,
                 now: store.now
             )

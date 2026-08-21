@@ -9,119 +9,21 @@ struct SettingsView: View {
     @State private var deleteID: UUID?
 
     var body: some View {
-        Form {
-            Section("Providers") {
-                ForEach(ProviderKind.allCases) { provider in
-                    Toggle(provider.title, isOn: enabledBinding(provider))
-                }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                header
+                providersCard
+                cursorCard
+                chatgptCard
+                glmCard
+                displayCard
+                aboutCard
             }
-
-            Section("Cursor") {
-                SecureField("Cookie (optional)", text: $store.cursorCookie)
-                    .textContentType(.password)
-                Text("Leave empty to read the local Cursor.app token from state.vscdb. Otherwise paste a WorkosCursorSessionToken or full Cookie header.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("ChatGPT") {
-                Text("QuotaBar uses the same Codex OAuth file CodexBar uses (~/.codex/auth.json from `codex login`). The in-app ChatGPT window is a cookie fallback that now hits that same usage API.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Button {
-                    ChatGPTLoginPresenter.shared.begin(store: store)
-                } label: {
-                    Label("Add account", systemImage: "plus")
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
-
-                if store.settings.chatgptAccounts.isEmpty {
-                    Text("No ChatGPT accounts yet.")
-                        .foregroundStyle(.secondary)
-                }
-
-                ForEach(store.settings.chatgptAccounts) { account in
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(alignment: .firstTextBaseline) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(account.label)
-                                    .font(.headline)
-                                if let email = account.email,
-                                   !email.isEmpty,
-                                   email.caseInsensitiveCompare(account.label) != .orderedSame {
-                                    Text(email)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            Spacer()
-                            Button("Rename") {
-                                renameID = account.id
-                                renameLabel = account.label
-                            }
-                            Button("Delete", role: .destructive) {
-                                deleteID = account.id
-                            }
-                        }
-
-                        DisclosureGroup("Advanced — cookie / JSON fallback") {
-                            SecureField("Session / cookie", text: cookieBinding(account.id))
-                                .textContentType(.password)
-                            Text("Optional pasted usage JSON (wham/usage or conversation_limit) when the live API has no percentages. Numbers are never invented.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            jsonEditor(for: account.id)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-            }
-
-            Section("GLM") {
-                SecureField("API key", text: $store.glmAPIKey)
-                    .textContentType(.password)
-                Picker("Region", selection: $store.settings.glmRegion) {
-                    ForEach(GLMRegion.allCases) { region in
-                        Text(region.title).tag(region)
-                    }
-                }
-                Text("Also accepted from ~/.config/quotabar/config.json or Z_AI_API_KEY / GLM_API_KEY / BIGMODEL_API_KEY. Keys are stored in the Keychain.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Display") {
-                Picker("Poll interval", selection: $store.settings.pollIntervalSeconds) {
-                    Text("30s").tag(30)
-                    Text("60s").tag(60)
-                    Text("2 min").tag(120)
-                    Text("5 min").tag(300)
-                    Text("10 min").tag(600)
-                }
-                Picker("Show", selection: $store.settings.displayMode) {
-                    ForEach(DisplayMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                Toggle("Launch at login", isOn: launchBinding)
-                Toggle("Preview fixtures", isOn: $store.settings.previewFixtures)
-                Text("Preview loads bundled sample JSON so the popover can be screenshot without accounts. Off by default.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("About") {
-                LabeledContent("Version", value: appVersion)
-                Text("Unofficial usage endpoints can change or break without notice. QuotaBar stores secrets in the Keychain and never phones home.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            .padding(Theme.settingsPadding)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .formStyle(.grouped)
-        .frame(minWidth: 420, minHeight: 560)
+        .background(Theme.settingsPageFill)
+        .frame(minWidth: Theme.settingsMinWidth, minHeight: Theme.settingsMinHeight)
         .onChange(of: store.cursorCookie) { _, _ in store.persistSecrets() }
         .onChange(of: store.glmAPIKey) { _, _ in store.persistSecrets() }
         .onChange(of: store.settings) { _, _ in
@@ -138,7 +40,7 @@ struct SettingsView: View {
         .alert("Rename account", isPresented: renamePresented) {
             TextField("Label", text: $renameLabel)
             Button("Save") {
-                if let renameID {
+                if let renameID = renameID {
                     store.renameChatGPTAccount(renameID, to: renameLabel)
                 }
             }
@@ -150,7 +52,7 @@ struct SettingsView: View {
             titleVisibility: .visible
         ) {
             Button("Delete", role: .destructive) {
-                if let deleteID {
+                if let deleteID = deleteID {
                     store.deleteChatGPTAccount(deleteID)
                 }
             }
@@ -158,6 +60,269 @@ struct SettingsView: View {
         } message: {
             Text("The Keychain cookie and JSON for this account are removed. Other accounts are left alone.")
         }
+    }
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: 14) {
+            QuotaBarSettingsMark()
+                .frame(width: 36, height: 36)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("QuotaBar")
+                    .font(.system(size: 22, weight: .semibold))
+                Text("Remaining quota for Cursor, ChatGPT, and GLM — in the menu bar.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Version \(appVersion)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.bottom, 2)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var providersCard: some View {
+        SettingsCard(
+            title: "Providers",
+            symbol: "switch.2",
+            tint: Theme.logoBlue,
+            hint: "Turn off a provider to hide it from the popover."
+        ) {
+            HStack(spacing: 8) {
+                ForEach(ProviderKind.allCases) { provider in
+                    providerChip(provider)
+                }
+            }
+        }
+    }
+
+    private var cursorCard: some View {
+        SettingsCard(
+            title: "Cursor",
+            symbol: ProviderKind.cursor.settingsSymbol,
+            tint: Theme.settingsTint(for: .cursor),
+            hint: "Leave empty to use the local Cursor.app token."
+        ) {
+            SecureField("Cookie (optional)", text: $store.cursorCookie)
+                .textContentType(.password)
+                .frame(minHeight: Theme.settingsHitTarget)
+            Text("Or paste a WorkosCursorSessionToken / full Cookie header.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var chatgptCard: some View {
+        SettingsCard(
+            title: "ChatGPT",
+            symbol: ProviderKind.chatgpt.settingsSymbol,
+            tint: Theme.settingsTint(for: .chatgpt),
+            hint: "QuotaBar reads ~/.codex/auth.json from `codex login`. Add account is a cookie fallback for the same usage API."
+        ) {
+            Button {
+                ChatGPTLoginPresenter.shared.begin(store: store)
+            } label: {
+                Label("Add account", systemImage: "plus")
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: Theme.settingsHitTarget)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
+
+            if store.settings.chatgptAccounts.isEmpty {
+                Text("No accounts yet.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(store.settings.chatgptAccounts.enumerated()), id: \.element.id) { index, account in
+                        if index > 0 {
+                            Divider().overlay(Theme.settingsHairline)
+                        }
+                        accountRow(account)
+                            .padding(.vertical, 10)
+                    }
+                }
+            }
+        }
+    }
+
+    private var glmCard: some View {
+        SettingsCard(
+            title: "GLM",
+            symbol: ProviderKind.glm.settingsSymbol,
+            tint: Theme.settingsTint(for: .glm),
+            hint: "Stored in the Keychain. Also accepted from ~/.config/quotabar/config.json or Z_AI_API_KEY."
+        ) {
+            SecureField("API key", text: $store.glmAPIKey)
+                .textContentType(.password)
+                .frame(minHeight: Theme.settingsHitTarget)
+            Picker("Region", selection: $store.settings.glmRegion) {
+                ForEach(GLMRegion.allCases) { region in
+                    Text(region.title).tag(region)
+                }
+            }
+            .frame(minHeight: Theme.settingsHitTarget)
+        }
+    }
+
+    private var displayCard: some View {
+        SettingsCard(
+            title: "Display",
+            symbol: "slider.horizontal.3",
+            tint: Color.primary.opacity(0.65),
+            hint: nil
+        ) {
+            Picker("Poll interval", selection: $store.settings.pollIntervalSeconds) {
+                Text("30s").tag(30)
+                Text("60s").tag(60)
+                Text("2 min").tag(120)
+                Text("5 min").tag(300)
+                Text("10 min").tag(600)
+            }
+            .frame(minHeight: Theme.settingsHitTarget)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Show")
+                    .font(.system(size: 12, weight: .medium))
+                Picker("Show", selection: $store.settings.displayMode) {
+                    ForEach(DisplayMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(minHeight: Theme.settingsHitTarget)
+            }
+
+            Toggle("Launch at login", isOn: launchBinding)
+                .frame(minHeight: Theme.settingsHitTarget)
+            Toggle("Preview fixtures", isOn: $store.settings.previewFixtures)
+                .frame(minHeight: Theme.settingsHitTarget)
+            Text("Preview loads bundled sample JSON so the popover can be screenshot without accounts.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var aboutCard: some View {
+        SettingsCard(
+            title: "About",
+            symbol: "info.circle",
+            tint: Color.primary.opacity(0.55),
+            hint: nil
+        ) {
+            HStack {
+                Text("Version")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(appVersion)
+                    .font(.system(size: 13, weight: .medium).monospacedDigit())
+            }
+            .frame(minHeight: Theme.settingsHitTarget)
+            Text("Unofficial usage endpoints can change without notice. Secrets stay in the Keychain; QuotaBar never phones home.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func accountRow(_ account: ChatGPTAccount) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(account.label)
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1)
+                    if let email = account.email,
+                       !email.isEmpty,
+                       email.caseInsensitiveCompare(account.label) != .orderedSame {
+                        Text(email)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 8)
+                iconButton("pencil", help: "Rename") {
+                    renameID = account.id
+                    renameLabel = account.label
+                }
+                iconButton("trash", help: "Delete", destructive: true) {
+                    deleteID = account.id
+                }
+            }
+
+            DisclosureGroup("Advanced — cookie / JSON") {
+                VStack(alignment: .leading, spacing: 8) {
+                    SecureField("Session cookie", text: cookieBinding(account.id))
+                        .textContentType(.password)
+                        .frame(minHeight: Theme.settingsHitTarget)
+                    Text("Optional pasted wham/usage JSON when the live API has no percentages.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    jsonEditor(for: account.id)
+                }
+                .padding(.top, 8)
+            }
+            .font(.system(size: 12))
+        }
+    }
+
+    private func providerChip(_ provider: ProviderKind) -> some View {
+        let on = store.settings.enabledProviders.contains(provider)
+        let tint = Theme.settingsTint(for: provider)
+        return Button {
+            store.setEnabled(provider, enabled: !on)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: provider.settingsSymbol)
+                    .font(.system(size: 11, weight: .semibold))
+                Text(provider.title)
+                    .font(.system(size: 12, weight: .medium))
+                if on {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .bold))
+                }
+            }
+            .foregroundStyle(on ? Color.primary : Color.secondary)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: Theme.settingsHitTarget)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(on ? tint.opacity(0.16) : Color.primary.opacity(0.04))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(on ? tint.opacity(0.35) : Theme.settingsHairline, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .help(on ? "Hide \(provider.title) in the popover" : "Show \(provider.title) in the popover")
+    }
+
+    private func iconButton(
+        _ systemName: String,
+        help: String,
+        destructive: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(destructive ? Color.red.opacity(0.85) : Color.secondary)
+                .frame(width: Theme.settingsHitTarget, height: Theme.settingsHitTarget)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.primary.opacity(0.05))
+                )
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 
     private var appVersion: String {
@@ -180,12 +345,12 @@ struct SettingsView: View {
             .padding(8)
             .frame(minHeight: 80, maxHeight: 160)
             .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color(NSColor.textBackgroundColor))
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color(nsColor: .textBackgroundColor))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.15), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Theme.settingsHairline, lineWidth: 1)
             )
     }
 
@@ -217,17 +382,82 @@ struct SettingsView: View {
         )
     }
 
-    private func enabledBinding(_ provider: ProviderKind) -> Binding<Bool> {
-        Binding(
-            get: { store.settings.enabledProviders.contains(provider) },
-            set: { store.setEnabled(provider, enabled: $0) }
-        )
-    }
-
     private var launchBinding: Binding<Bool> {
         Binding(
             get: { store.settings.launchAtLogin },
             set: { store.setLaunchAtLogin($0) }
         )
+    }
+}
+
+private struct SettingsCard<Content: View>: View {
+    let title: String
+    let symbol: String
+    let tint: Color
+    var hint: String?
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: symbol)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 26, height: 26)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(tint.opacity(0.14))
+                    )
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                    if let hint = hint, !hint.isEmpty {
+                        Text(hint)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            content()
+        }
+        .padding(Theme.settingsCardPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.settingsCardRadius, style: .continuous)
+                .fill(Theme.settingsCardFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.settingsCardRadius, style: .continuous)
+                .strokeBorder(Theme.settingsHairline, lineWidth: 1)
+        )
+    }
+}
+
+private struct QuotaBarSettingsMark: View {
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 3) {
+            cap(Theme.logoBlue, 0.42)
+            cap(Theme.logoPurple, 0.68)
+            cap(Theme.logoGreen, 1.0)
+        }
+        .padding(8)
+        .frame(width: 36, height: 36)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(Color.primary.opacity(0.06))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .strokeBorder(Theme.settingsHairline, lineWidth: 1)
+        )
+        .accessibilityHidden(true)
+    }
+
+    private func cap(_ color: Color, _ height: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: 1.2, style: .continuous)
+            .fill(color)
+            .frame(width: 4.5, height: 18 * height)
     }
 }

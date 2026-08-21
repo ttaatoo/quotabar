@@ -32,7 +32,7 @@ To build from `main` instead of the cask: `brew install --formula --HEAD ttaatoo
 ## What you get
 
 - Status item: dark rounded pill with a small bar-chart mark and a percentage (remaining quota for the selected provider’s most-constrained window, usually weekly). When ChatGPT is selected, that percentage is the selected ChatGPT account’s most-constrained remaining %. The number turns orange below 25% remaining.
-- Popover (not a detached window): provider title + plan badge, relative “Updated …” time, refresh, a three-way provider switcher (Cursor / ChatGPT / GLM), an account switcher when ChatGPT has two or more accounts, Session and Weekly meters, reset countdowns, Settings… and Quit QuotaBar.
+- Popover (not a detached window): provider title + plan badge, relative “Updated …” time, refresh, a three-way provider switcher (Cursor / ChatGPT / GLM), an account switcher when ChatGPT has two or more accounts, two reserved meters (Session / Weekly for ChatGPT and GLM; **Cursor Models** / **Other Models** for Cursor), reset countdowns, Settings… and Quit QuotaBar.
 - Settings: enable each provider, add / rename / delete ChatGPT accounts (QuotaBar also reads `~/.codex/auth.json` from `codex login`; Add account is a cookie fallback), paste Cursor / GLM credentials, GLM region, poll interval (default 120s), remaining vs used, launch at login (`SMAppService`), and an off-by-default **Preview fixtures** toggle for screenshots.
 
 If a provider is not signed in, you see a “Sign in / add key” empty state — never fake 100% bars.
@@ -91,7 +91,7 @@ Secrets go in the macOS Keychain (`app.quotabar.QuotaBar`). Non-secret preferenc
    `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`  
    (copies the DB plus WAL/SHM first) and reads `cursorAuth/accessToken`.
 2. Optional fallback: paste a `WorkosCursorSessionToken` cookie (or a full Cookie header) from [cursor.com/dashboard](https://cursor.com/dashboard) in Settings.
-3. Live fetch: `GET https://cursor.com/api/usage-summary`. Included / Auto percent maps to **Session**; billing-cycle / total percent maps to **Weekly**. Reset times come from `billingCycleEnd`.
+3. Live fetch: `GET https://cursor.com/api/usage-summary`. The two dashboard pools map to the two reserved meters: **Cursor Models** (Auto + Composer) from `individualUsage.plan.autoPercentUsed`, **Other Models** (named / API) from `apiPercentUsed`. Both reset at `billingCycleEnd`. If `apiPercentUsed` is missing, Other Models stays the disabled “—” row — `totalPercentUsed` is not substituted. Team fallback: `autoModelSelectedDisplayMessage` → Cursor Models, `namedModelSelectedDisplayMessage` → Other Models. On-demand spend stays a footer (`On-demand $x.xx`), never a third percent bar.
 
 ### ChatGPT (Plus / Pro)
 
@@ -99,7 +99,7 @@ ChatGPT is the only provider with **multi-account** support. Cursor and GLM stay
 
 QuotaBar uses the same live usage path CodexBar uses:
 
-1. Prefer `GET https://chatgpt.com/backend-api/wham/usage` (then `https://chat.openai.com/backend-api/wham/usage` if needed) with `Authorization: Bearer <token>`, the chatgpt.com session cookie when we have one, and `ChatGPT-Account-Id` when known. **Session** comes from `rate_limit.primary_window`; **Weekly** from `rate_limit.secondary_window` (`used_percent`, `reset_at`, `limit_window_seconds` ≈ 5h / 7d). `credits.balance` / unlimited may appear as a footer — percentages are never invented from credits.
+1. Prefer `GET https://chatgpt.com/backend-api/wham/usage` (then `https://chat.openai.com/backend-api/wham/usage` if needed) with `Authorization: Bearer <token>`, the chatgpt.com session cookie when we have one, and `ChatGPT-Account-Id` when known. Each `rate_limit` window is classified by **duration** (`limit_window_seconds` / `window_seconds` / `windowDurationMins`), not by primary/secondary slot: ≤ ~12h → **Session**, ~3–14d (incl. 10080 min / 7d) → **Weekly**, ~30d (43200 min) → **Monthly**. Plus / Codex often return only a 7-day `primary` and no 5-hour session — that window is Weekly, and Session stays the disabled “—” row. A lone window whose reset is days away is Weekly, not Session. Countdown uses the real title (`Weekly reset in 5d 13h`). `credits.balance` / unlimited stay footer-only — percentages are never invented from credits.
 2. Tokens come from a chatgpt.com session cookie (Add account / paste) exchanged at `GET /api/auth/session`, **or** a read-only `~/.codex/auth.json` (or `$CODEX_HOME/auth.json`) written by `codex login` — the same file CodexBar reads. QuotaBar does not refresh or rewrite that file and does not start a Codex OAuth dance.
 3. If `auth.json` exists and you have not added a ChatGPT account yet, Refresh uses that file as an implicit source. QuotaBar will not create a new account on every launch.
 4. In Settings → ChatGPT, **Add account** still opens an isolated `WKWebView` on `https://chatgpt.com` as a cookie fallback. After a real session exists, the cookie is stored in the Keychain and the **label is the session email**. If ChatGPT returns no email, the label falls back to **ChatGPT** / **ChatGPT 2**. Repeat **Add account** for each extra login — each window uses a fresh `WKWebsiteDataStore`.
@@ -109,7 +109,7 @@ QuotaBar uses the same live usage path CodexBar uses:
    `GET https://chatgpt.com/backend-api/conversation_limit` and  
    `GET https://chatgpt.com/public-api/conversation_limit`, then optional pasted JSON.
 8. Meters are drawn only when the JSON actually contains remaining/used percentages. Auth failures stay signed out. JSON without percentages is an honest error that mentions `wham/usage` / `codex login` — not dummy 80%. A 401 on one account does not wipe the others.
-9. In the popover, pick **ChatGPT**. If you have two or more accounts, a compact account switcher appears under the provider switcher. Session / Weekly meters, the plan badge, and “Updated …” follow the selected account. The menu-bar percentage is that account’s most-constrained remaining % (orange below 25%).
+9. In the popover, pick **ChatGPT**. If you have two or more accounts, a compact account switcher appears under the provider switcher. The two reserved meters (Session / Weekly, or Monthly when that is the only longer window), the plan badge, and “Updated …” follow the selected account. The menu-bar percentage is that account’s most-constrained remaining % among the **classified** windows (orange below 25%).
 10. **Refresh** updates the selected ChatGPT account (or the implicit `auth.json` source when there are no accounts). Background polling refreshes every ChatGPT account so switching stays instant. A successful Add account also refreshes that account so meters can fill in.
 11. Existing single-cookie / single-JSON installs are migrated to one account labeled **ChatGPT**; credentials are not dropped. If you have no accounts and no readable `auth.json`, the popover shows the usual “Sign in / add key” empty state with a button that opens Settings.
 
