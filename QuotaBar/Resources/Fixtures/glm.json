@@ -1,0 +1,45 @@
+{
+  "code": 200,
+  "msg": "Operation successful",
+  "success": true,
+  "data": {
+    "planName": "Pro",
+    "level": "pro",
+    "limits": [
+      {
+        "type": "TOKENS_LIMIT",
+        "unit": 3,
+        "number": 5,
+        "usage": 800000000,
+        "currentValue": 56000000,
+        "remaining": 744000000,
+        "percentage": 7,
+        "nextResetTime": 1787334540000
+      },
+      {
+        "type": "TOKENS_LIMIT",
+        "unit": 6,
+        "number": 1,
+        "usage": 4000000000,
+        "currentValue": 2360000000,
+        "remaining": 1640000000,
+        "percentage": 59,
+        "nextResetTime": 1787670000000
+      },
+      {
+        "type": "TIME_LIMIT",
+        "unit": 5,
+        "number": 1,
+        "usage": 4000,
+        "currentValue": 1828,
+        "remaining": 2172,
+        "percentage": 45,
+        "usageDetails": [
+          { "modelCode": "search-prime", "usage": 1433 },
+          { "modelCode": "web-reader", "usage": 462 },
+          { "modelCode": "zread", "usage": 0 }
+        ]
+      }
+    ]
+  }
+}

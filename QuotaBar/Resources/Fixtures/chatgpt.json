@@ -1,0 +1,15 @@
+{
+  "plan": "Plus",
+  "session": {
+    "label": "Session",
+    "remainingPercent": 93,
+    "usedPercent": 7,
+    "resetAt": "2026-08-21T18:00:00Z"
+  },
+  "weekly": {
+    "label": "Weekly",
+    "remainingPercent": 41,
+    "usedPercent": 59,
+    "resetAt": "2026-08-25T15:40:00Z"
+  }
+}
