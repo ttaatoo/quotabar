@@ -9,7 +9,7 @@ cask "quotabar" do
   desc "Menu bar quota for Cursor, ChatGPT, and GLM"
   homepage "https://github.com/ttaatoo/quotabar"
 
-  depends_on macos: ">= :sonoma"
+  depends_on macos: :sonoma
 
   app "QuotaBar.app"
 
