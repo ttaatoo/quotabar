@@ -10,23 +10,24 @@ Ad-hoc signed (no Apple Developer ID). On your Mac:
 
 ```bash
 brew tap ttaatoo/quotabar https://github.com/ttaatoo/quotabar
-brew install --formula --HEAD ttaatoo/quotabar/quotabar
-# after the v0.0.2 zip is published:
-brew install --cask --no-quarantine ttaatoo/quotabar/quotabar
+brew install --cask ttaatoo/quotabar/quotabar
 ```
 
-`--HEAD` builds from `main` and works immediately after this repo is merged. `--no-quarantine` is required for the ad-hoc signed cask.
-
-Then:
+Upgrade:
 
 ```bash
-# formula prefix; skip if you used the cask
-xattr -dr com.apple.quarantine "$(brew --prefix quotabar)/QuotaBar.app"
+brew upgrade --cask ttaatoo/quotabar/quotabar
 ```
 
-If Gatekeeper still blocks it: **System Settings → Privacy & Security → Open Anyway**.
+If Gatekeeper blocks the app:
 
-Optional: `ln -sf "$(brew --prefix quotabar)/QuotaBar.app" /Applications/QuotaBar.app`
+```bash
+xattr -dr com.apple.quarantine /Applications/QuotaBar.app
+```
+
+Then **System Settings → Privacy & Security → Open Anyway**.
+
+To build from `main` instead of the cask: `brew install --formula --HEAD ttaatoo/quotabar/quotabar`. After a formula install, clear quarantine on the cellar prefix (`xattr -dr com.apple.quarantine "$(brew --prefix quotabar)/QuotaBar.app"`). Optional: `ln -sf "$(brew --prefix quotabar)/QuotaBar.app" /Applications/QuotaBar.app`
 
 ## What you get
 

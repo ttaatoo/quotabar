@@ -16,14 +16,17 @@ cask "quotabar" do
   caveats <<~EOS
     QuotaBar is ad-hoc signed (no Apple Developer ID). Install with:
 
-      brew install --cask --no-quarantine ttaatoo/quotabar/quotabar
+      brew tap ttaatoo/quotabar https://github.com/ttaatoo/quotabar
+      brew install --cask ttaatoo/quotabar/quotabar
 
-    --no-quarantine is required so Gatekeeper does not quarantine the zip.
-
-    If macOS still blocks the app:
+    If Gatekeeper blocks the app:
 
       xattr -dr com.apple.quarantine /Applications/QuotaBar.app
 
     Then System Settings → Privacy & Security → Open Anyway.
+
+    Upgrade:
+
+      brew upgrade --cask ttaatoo/quotabar/quotabar
   EOS
 end
