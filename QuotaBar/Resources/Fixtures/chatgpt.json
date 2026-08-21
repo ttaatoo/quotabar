@@ -1,5 +1,7 @@
 {
   "plan": "Plus",
+  "email": "user@example.com",
+  "credits": { "balance": 0 },
   "session": {
     "label": "Session",
     "remainingPercent": 93,

@@ -1,0 +1,13 @@
+{
+  "config": {
+    "creditUsagePercent": 28,
+    "currentPeriod": {
+      "end": "2026-08-28T15:40:00.000Z"
+    },
+    "billingPeriodEnd": "2026-08-28T15:40:00.000Z",
+    "onDemandCap": { "val": 0 },
+    "onDemandUsed": { "val": 0 }
+  },
+  "subscription_tier_display": "SuperGrok",
+  "email": "user@example.com"
+}

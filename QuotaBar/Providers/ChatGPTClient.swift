@@ -655,15 +655,18 @@ enum ChatGPTClient {
         let plan = fallbackPlan
             ?? JSONWalk.string(raw, keys: ["plan", "planName", "plan_type"])
             .map(humanPlanName)
-        return UsageSnapshot(
+        var snapshot = UsageSnapshot(
             provider: .chatgpt,
             planName: plan,
             fetchedAt: fetchedAt,
             session: session,
             weekly: weekly,
             source: source,
-            extraFooter: nil
+            extraFooter: creditsFooter(from: raw)
         )
+        snapshot.accountEmail = JSONWalk.string(raw, keys: ["email", "accountEmail"])
+            ?? CodexCLIAuth.email(from: raw)
+        return snapshot
     }
 
     private static func candidate(from object: [String: Any], key: String?) -> CandidateWindow? {

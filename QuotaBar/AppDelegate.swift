@@ -45,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hosting.preferredContentSize = Theme.popoverChromeSize
         hosting.view.frame = NSRect(origin: .zero, size: Theme.popoverChromeSize)
         popover.contentViewController = hosting
+        // Frozen after first setup. Tab switch and objectWillChange must not rewrite contentSize.
         popover.contentSize = Theme.popoverChromeSize
         self.popover = popover
         paintPopoverChrome()

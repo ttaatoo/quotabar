@@ -27,10 +27,10 @@ struct UsageMeterRow: View {
         let active = window != nil
         let low = window?.isLow(mode: mode, threshold: Theme.lowQuotaThreshold) ?? false
         let fill = min(max((window?.displayedPercent(mode: mode) ?? 0) / 100, 0), 1)
-        let titleSize: CGFloat = compact ? 11.5 : 13
-        let footerSize: CGFloat = compact ? 10 : 10.5
+        let titleSize: CGFloat = compact ? 11 : 13
+        let footerSize: CGFloat = compact ? 9.5 : 10.5
 
-        VStack(alignment: .leading, spacing: compact ? 3 : 6) {
+        VStack(alignment: .leading, spacing: compact ? 2 : 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text(title)
                     .font(.system(size: titleSize, weight: .medium))

@@ -24,6 +24,8 @@
 		00000000000000000000001E /* CursorClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001D /* CursorClient.swift */; };
 		000000000000000000000020 /* ChatGPTClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001F /* ChatGPTClient.swift */; };
 		000000000000000000000022 /* GLMClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000021 /* GLMClient.swift */; };
+		000000000000000000000091 /* GrokAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000090 /* GrokAuth.swift */; };
+		000000000000000000000093 /* GrokClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000092 /* GrokClient.swift */; };
 		000000000000000000000024 /* FixtureLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000023 /* FixtureLoader.swift */; };
 		000000000000000000000026 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000025 /* Theme.swift */; };
 		000000000000000000000028 /* UsageMeterRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000027 /* UsageMeterRow.swift */; };
@@ -40,6 +42,7 @@
 		000000000000000000000038 /* cursor.json in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000037 /* cursor.json */; };
 		00000000000000000000003A /* chatgpt.json in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000039 /* chatgpt.json */; };
 		00000000000000000000003C /* glm.json in Resources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000003B /* glm.json */; };
+		000000000000000000000095 /* grok.json in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000094 /* grok.json */; };
 		00000000000000000000004D /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 00000000000000000000004C /* libsqlite3.tbd */; };
 /* End PBXBuildFile section */
 
@@ -61,6 +64,8 @@
 		00000000000000000000001D /* CursorClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorClient.swift; sourceTree = "<group>"; };
 		00000000000000000000001F /* ChatGPTClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTClient.swift; sourceTree = "<group>"; };
 		000000000000000000000021 /* GLMClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GLMClient.swift; sourceTree = "<group>"; };
+		000000000000000000000090 /* GrokAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokAuth.swift; sourceTree = "<group>"; };
+		000000000000000000000092 /* GrokClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokClient.swift; sourceTree = "<group>"; };
 		000000000000000000000023 /* FixtureLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureLoader.swift; sourceTree = "<group>"; };
 		000000000000000000000025 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		000000000000000000000027 /* UsageMeterRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageMeterRow.swift; sourceTree = "<group>"; };
@@ -77,6 +82,7 @@
 		000000000000000000000037 /* cursor.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = cursor.json; sourceTree = "<group>"; };
 		000000000000000000000039 /* chatgpt.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = chatgpt.json; sourceTree = "<group>"; };
 		00000000000000000000003B /* glm.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = glm.json; sourceTree = "<group>"; };
+		000000000000000000000094 /* grok.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = grok.json; sourceTree = "<group>"; };
 		00000000000000000000003D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		00000000000000000000003E /* QuotaBar.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = QuotaBar.entitlements; sourceTree = "<group>"; };
 		00000000000000000000004E /* QuotaBar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = QuotaBar.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -155,6 +161,8 @@
 				000000000000000000000082 /* CodexCLILocator.swift */,
 				00000000000000000000001F /* ChatGPTClient.swift */,
 				000000000000000000000021 /* GLMClient.swift */,
+				000000000000000000000090 /* GrokAuth.swift */,
+				000000000000000000000092 /* GrokClient.swift */,
 				000000000000000000000023 /* FixtureLoader.swift */,
 			);
 			path = Providers;
@@ -190,6 +198,7 @@
 				000000000000000000000037 /* cursor.json */,
 				000000000000000000000039 /* chatgpt.json */,
 				00000000000000000000003B /* glm.json */,
+				000000000000000000000094 /* grok.json */,
 			);
 			path = Fixtures;
 			sourceTree = "<group>";
@@ -265,6 +274,7 @@
 				000000000000000000000038 /* cursor.json in Resources */,
 				00000000000000000000003A /* chatgpt.json in Resources */,
 				00000000000000000000003C /* glm.json in Resources */,
+				000000000000000000000095 /* grok.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -294,6 +304,8 @@
 				000000000000000000000083 /* CodexCLILocator.swift in Sources */,
 				000000000000000000000020 /* ChatGPTClient.swift in Sources */,
 				000000000000000000000022 /* GLMClient.swift in Sources */,
+				000000000000000000000091 /* GrokAuth.swift in Sources */,
+				000000000000000000000093 /* GrokClient.swift in Sources */,
 				000000000000000000000024 /* FixtureLoader.swift in Sources */,
 				000000000000000000000026 /* Theme.swift in Sources */,
 				000000000000000000000028 /* UsageMeterRow.swift in Sources */,

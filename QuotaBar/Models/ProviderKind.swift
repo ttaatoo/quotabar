@@ -4,6 +4,7 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable, Hashable {
     case cursor
     case chatgpt
     case glm
+    case grok
 
     var id: String { rawValue }
 
@@ -12,6 +13,7 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable, Hashable {
         case .cursor: return "Cursor"
         case .chatgpt: return "ChatGPT"
         case .glm: return "GLM"
+        case .grok: return "Grok"
         }
     }
 
@@ -21,7 +23,7 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable, Hashable {
     var primaryWindowTitle: String {
         switch self {
         case .cursor: return "Cursor Models"
-        case .chatgpt, .glm: return "Session"
+        case .chatgpt, .glm, .grok: return "Session"
         }
     }
 
@@ -30,6 +32,7 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable, Hashable {
         switch self {
         case .cursor: return "Other Models"
         case .chatgpt, .glm: return "Weekly"
+        case .grok: return "Credits"
         }
     }
 
@@ -38,6 +41,7 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable, Hashable {
         case .cursor: return "square.grid.2x2"
         case .chatgpt: return "text.bubble"
         case .glm: return "hexagon"
+        case .grok: return "sparkles"
         }
     }
 
@@ -49,6 +53,8 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable, Hashable {
             return "Add a ChatGPT account in Settings to run `codex login` in your default browser, or paste a session cookie / usage JSON under Advanced."
         case .glm:
             return "Paste a z.ai / BigModel API key in Settings, or set Z_AI_API_KEY."
+        case .grok:
+            return GrokAuth.signInHint
         }
     }
 }

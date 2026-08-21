@@ -15,6 +15,7 @@ final class AppStore: ObservableObject {
     @Published var chatgptCookies: [UUID: String] = [:]
     @Published var chatgptJSONs: [UUID: String] = [:]
     @Published var glmAPIKey: String = ""
+    @Published var grokOAuthToken: String = ""
 
     private var pollTimer: Timer?
     private var clockTimer: Timer?
@@ -26,6 +27,7 @@ final class AppStore: ObservableObject {
         states = Dictionary(uniqueKeysWithValues: ProviderKind.allCases.map { ($0, .idle) })
         cursorCookie = KeychainStore.get(.cursorCookie) ?? ""
         glmAPIKey = KeychainStore.get(.glmAPIKey) ?? ""
+        grokOAuthToken = KeychainStore.get(.grokOAuthToken) ?? ""
         loadChatGPTSecrets()
     }
 
@@ -44,6 +46,44 @@ final class AppStore: ObservableObject {
 
     var cursorEmail: String? {
         states[.cursor]?.snapshot?.accountEmail
+    }
+
+    var grokEmail: String? {
+        states[.grok]?.snapshot?.accountEmail
+            ?? GrokAuth.loadAuthFile()?.email
+    }
+
+    /// One card per ChatGPT account; Cursor / GLM / Grok are a single card each.
+    var accountCards: [AccountCardRow] {
+        if selected == .chatgpt {
+            return chatgptDisplayRows.map { row in
+                AccountCardRow(
+                    id: row.id.uuidString,
+                    email: row.account?.email,
+                    fallbackTitle: row.account?.label ?? "Email unknown",
+                    state: row.state
+                )
+            }
+        }
+        let state = states[selected] ?? .idle
+        let email = state.snapshot?.accountEmail
+        let fallback: String
+        switch state {
+        case .signedOut:
+            fallback = "Not signed in"
+        case .ready:
+            fallback = "Email unknown"
+        default:
+            fallback = selected.title
+        }
+        return [
+            AccountCardRow(
+                id: selected.rawValue,
+                email: email,
+                fallbackTitle: fallback,
+                state: state
+            )
+        ]
     }
 
     var hasAmbientCodexAccount: Bool {
@@ -202,6 +242,7 @@ final class AppStore: ObservableObject {
     func persistSecrets() {
         KeychainStore.set(cursorCookie, account: .cursorCookie)
         KeychainStore.set(glmAPIKey, account: .glmAPIKey)
+        KeychainStore.set(grokOAuthToken, account: .grokOAuthToken)
         persistChatGPTSecrets()
     }
 
@@ -583,6 +624,8 @@ final class AppStore: ObservableObject {
             )
         case .glm:
             return try await GLMClient.fetch(apiKey: emptyToNil(glmAPIKey), region: settings.glmRegion)
+        case .grok:
+            return try await GrokClient.fetch(pastedToken: emptyToNil(grokOAuthToken))
         }
     }
 
@@ -597,5 +640,12 @@ final class AppStore: ObservableObject {
 struct ChatGPTDisplayRow: Identifiable, Equatable {
     var id: UUID
     var account: ChatGPTAccount?
+    var state: ProviderLoadState
+}
+
+struct AccountCardRow: Identifiable, Equatable {
+    var id: String
+    var email: String?
+    var fallbackTitle: String
     var state: ProviderLoadState
 }
