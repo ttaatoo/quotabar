@@ -40,7 +40,7 @@ struct UsageMeterRow: View {
                 ZStack(alignment: .leading) {
                     Capsule()
                         .fill(Theme.track)
-                    if active {
+                    if active, fill > 0 {
                         Capsule()
                             .fill(low ? Theme.warning : Color.white)
                             .frame(width: max(2, geo.size.width * fill))

@@ -40,7 +40,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupPopover() {
         let popover = NSPopover()
         popover.behavior = .transient
-        popover.animates = true
+        // Reserved slots keep height stable; animating contentSize still rubber-bands on tab switch.
+        popover.animates = false
         popover.appearance = NSAppearance(named: .darkAqua)
         let hosting = NSHostingController(
             rootView: PopoverView(store: store, onIntrinsicSizeChange: { [weak self] size in
@@ -79,8 +80,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func applyPopoverContentSize(_ size: CGSize) {
-        let height = ceil(size.height)
-        guard height > 1 else { return }
+        let reported = ceil(size.height)
+        guard reported > 1 else { return }
+        // Snap near the reserved-slot height so leftover 1pt layout jitter
+        // does not rewrite contentSize (and bounce) on every tab switch.
+        let height: CGFloat
+        if abs(reported - Theme.popoverCompactHeight) < 4 {
+            height = Theme.popoverCompactHeight
+        } else {
+            height = max(reported, Theme.popoverCompactHeight)
+        }
         let next = NSSize(width: Theme.popoverWidth, height: height)
         lastIntrinsicSize = next
         if abs(popover.contentSize.height - next.height) > 0.5

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct SettingsView: View {
@@ -24,9 +25,17 @@ struct SettingsView: View {
             }
 
             Section("ChatGPT") {
-                Text(verbatim: "Add account opens a ChatGPT sign-in window. After you finish, QuotaBar reads the session cookie and uses your email as the label (you can rename it). Each add uses a fresh in-app browser so the next login is not already signed in. Cookie and conversation_limit JSON stay in the Keychain as an optional fallback. Cursor and GLM stay single-account. QuotaBar never invents percentages.")
+                Text("Add account opens a fresh ChatGPT sign-in window. QuotaBar stores the session cookie in the Keychain and uses your email as the label.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                Button {
+                    ChatGPTLoginPresenter.shared.begin(store: store)
+                } label: {
+                    Label("Add account", systemImage: "plus")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
 
                 if store.settings.chatgptAccounts.isEmpty {
                     Text("No ChatGPT accounts yet.")
@@ -63,16 +72,10 @@ struct SettingsView: View {
                             Text("Optional conversation_limit JSON from DevTools when the live endpoint has no percentages.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            TextEditor(text: jsonBinding(account.id))
-                                .font(.system(.caption, design: .monospaced))
-                                .frame(minHeight: 72)
+                            jsonEditor(for: account.id)
                         }
                     }
                     .padding(.vertical, 4)
-                }
-
-                Button("Add account") {
-                    ChatGPTLoginPresenter.shared.begin(store: store)
                 }
             }
 
@@ -111,7 +114,7 @@ struct SettingsView: View {
             }
 
             Section("About") {
-                LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.2")
+                LabeledContent("Version", value: appVersion)
                 Text("Unofficial usage endpoints can change or break without notice. QuotaBar stores secrets in the Keychain and never phones home.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -155,6 +158,35 @@ struct SettingsView: View {
         } message: {
             Text("The Keychain cookie and JSON for this account are removed. Other accounts are left alone.")
         }
+    }
+
+    private var appVersion: String {
+        let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        if let short = short, !short.isEmpty {
+            return short
+        }
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        if let build = build, !build.isEmpty {
+            return build
+        }
+        return "—"
+    }
+
+    @ViewBuilder
+    private func jsonEditor(for id: UUID) -> some View {
+        TextEditor(text: jsonBinding(id))
+            .font(.system(.caption, design: .monospaced))
+            .scrollContentBackground(.hidden)
+            .padding(8)
+            .frame(minHeight: 80, maxHeight: 160)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color(NSColor.textBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.15), lineWidth: 1)
+            )
     }
 
     private var renamePresented: Binding<Bool> {

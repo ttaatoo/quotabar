@@ -248,6 +248,15 @@ final class AppStore: ObservableObject {
     }
 
     func refreshSelected() async {
+        let alreadyRefreshing = isRefreshing
+        isRefreshing = true
+        defer {
+            if !alreadyRefreshing {
+                isRefreshing = false
+            }
+        }
+        // Let SwiftUI paint the spinner before a fast fetch coalesces state updates.
+        await Task.yield()
         if selected == .chatgpt {
             if let id = settings.selectedChatGPTAccountId {
                 await refreshChatGPTAccount(id, userInitiated: true)
