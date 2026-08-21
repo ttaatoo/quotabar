@@ -175,6 +175,44 @@ final class AppStore: ObservableObject {
         return id
     }
 
+    /// Create-on-success (or refresh an existing email's cookie). Label is the
+    /// session email when present; otherwise ChatGPT / ChatGPT 2. Rename stays
+    /// user-editable and is not overwritten on a later sign-in of the same email.
+    @discardableResult
+    func upsertChatGPTAccount(cookie: String, email: String?) -> UUID {
+        let trimmedCookie = ChatGPTClient.normalizeCookie(cookie)
+            ?? cookie.trimmingCharacters(in: .whitespacesAndNewlines)
+        let emailValue: String?
+        if let email = email?.trimmingCharacters(in: .whitespacesAndNewlines), !email.isEmpty {
+            emailValue = email
+        } else {
+            emailValue = nil
+        }
+
+        if let emailValue,
+           let existing = settings.chatgptAccounts.first(where: {
+               $0.email?.caseInsensitiveCompare(emailValue) == .orderedSame
+           }) {
+            setChatGPTCookie(trimmedCookie, for: existing.id)
+            recordChatGPTEmail(emailValue, for: existing.id)
+            settings.selectedChatGPTAccountId = existing.id
+            persistSettings()
+            Task { await refreshChatGPTAccount(existing.id, userInitiated: true) }
+            return existing.id
+        }
+
+        let label = emailValue ?? nextChatGPTLabel()
+        let id = addChatGPTAccount(label: label)
+        if let emailValue, let index = settings.chatgptAccounts.firstIndex(where: { $0.id == id }) {
+            settings.chatgptAccounts[index].email = emailValue
+        }
+        settings.selectedChatGPTAccountId = id
+        setChatGPTCookie(trimmedCookie, for: id)
+        persistSettings()
+        Task { await refreshChatGPTAccount(id, userInitiated: true) }
+        return id
+    }
+
     func renameChatGPTAccount(_ id: UUID, to label: String) {
         guard let index = settings.chatgptAccounts.firstIndex(where: { $0.id == id }) else { return }
         let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)

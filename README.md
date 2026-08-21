@@ -33,7 +33,7 @@ To build from `main` instead of the cask: `brew install --formula --HEAD ttaatoo
 
 - Status item: dark rounded pill with a small bar-chart mark and a percentage (remaining quota for the selected provider’s most-constrained window, usually weekly). When ChatGPT is selected, that percentage is the selected ChatGPT account’s most-constrained remaining %. The number turns orange below 25% remaining.
 - Popover (not a detached window): provider title + plan badge, relative “Updated …” time, refresh, a three-way provider switcher (Cursor / ChatGPT / GLM), an account switcher when ChatGPT has two or more accounts, Session and Weekly meters, reset countdowns, Settings… and Quit QuotaBar.
-- Settings: enable each provider, add / rename / delete ChatGPT accounts (cookie and JSON are per account), paste Cursor / GLM credentials, GLM region, poll interval (default 120s), remaining vs used, launch at login (`SMAppService`), and an off-by-default **Preview fixtures** toggle for screenshots.
+- Settings: enable each provider, add / rename / delete ChatGPT accounts (Add account opens a login window; cookie and JSON stay a per-account fallback), paste Cursor / GLM credentials, GLM region, poll interval (default 120s), remaining vs used, launch at login (`SMAppService`), and an off-by-default **Preview fixtures** toggle for screenshots.
 
 If a provider is not signed in, you see a “Sign in / add key” empty state — never fake 100% bars.
 
@@ -99,17 +99,17 @@ ChatGPT is the only provider with **multi-account** support. Cursor and GLM stay
 
 ChatGPT does not publish a stable official remaining-quota API. QuotaBar does **not** call Codex `/backend-api/wham/usage`.
 
-1. In Settings → ChatGPT, click **Add account** and give it a label (`work`, `personal`, `plus`, …).
-2. Paste that account’s chatgpt.com session cookie (`__Secure-next-auth.session-token=…` or the full Cookie header). Repeat **Add account** for each extra login.
-3. **Rename** or **Delete** from the same list. There is no single global ChatGPT cookie field.
-4. After a successful fetch, the account’s email is shown under its label. Account metadata (`id`, `label`, `enabled`, and that optional email) lives in `~/.config/quotabar/config.json`. The selected account id is stored there as `selectedChatGPTAccountId`. Cookies and optional pasted JSON stay in the Keychain as `chatgpt.cookie.<account-id>` and `chatgpt.json.<account-id>`.
+1. In Settings → ChatGPT, click **Add account**. A normal titled window opens `https://chatgpt.com` in an isolated in-app browser (`WKWebView`). Sign in with Google, email, or whatever ChatGPT shows. Closing that window without a session creates no account.
+2. After a real session exists, QuotaBar reads the chatgpt.com cookies (especially `__Secure-next-auth.session-token`, or the full Cookie header) and calls `GET https://chatgpt.com/api/auth/session`. The account **label is the session email**. If ChatGPT returns no email, the label falls back to **ChatGPT** / **ChatGPT 2**. Repeat **Add account** for each extra login — each window uses a fresh `WKWebsiteDataStore`, so the second sign-in is not already the first session.
+3. **Rename** (the email label is editable) or **Delete** from the same list. There is no single global ChatGPT cookie field.
+4. Cookie paste is not the default add path. Each account has a collapsed **Advanced — cookie / JSON fallback** for a session cookie (`__Secure-next-auth.session-token=…` or a full Cookie header) and optional `conversation_limit` JSON. The login window also has “Paste a session cookie instead” if the live page will not complete. Account metadata (`id`, `label`, `enabled`, and that optional email) lives in `~/.config/quotabar/config.json`. The selected account id is stored there as `selectedChatGPTAccountId`. Cookies and optional pasted JSON stay in the Keychain as `chatgpt.cookie.<account-id>` and `chatgpt.json.<account-id>`.
 5. QuotaBar exchanges each cookie at `GET https://chatgpt.com/api/auth/session` for a bearer token, then tries  
    `GET https://chatgpt.com/backend-api/conversation_limit` and  
    `GET https://chatgpt.com/public-api/conversation_limit`.
 6. It only draws meters when that JSON actually contains remaining/used percentages. If the endpoint 404s or has no numbers, you get an honest error — not dummy 80%. A 401 on one account does not wipe the others.
-7. Workaround: in chatgpt.com DevTools → Network, copy the `conversation_limit` response and paste it into that account’s JSON field in Settings.
+7. Workaround when the live endpoint has no percentages: in chatgpt.com DevTools → Network, copy the `conversation_limit` response and paste it into that account’s Advanced JSON field in Settings.
 8. In the popover, pick **ChatGPT**. If you have two or more accounts, a compact account switcher appears under the provider switcher. Session / Weekly meters, the plan badge, and “Updated …” follow the selected account. The menu-bar percentage is that account’s most-constrained remaining % (orange below 25%).
-9. **Refresh** updates the selected ChatGPT account. Background polling refreshes every ChatGPT account so switching stays instant.
+9. **Refresh** updates the selected ChatGPT account. Background polling refreshes every ChatGPT account so switching stays instant. A successful Add account also refreshes that account so meters can fill in.
 10. Existing single-cookie / single-JSON installs are migrated to one account labeled **ChatGPT**; credentials are not dropped. If you have no accounts, the popover shows the usual “Sign in / add key” empty state with a button that opens Settings.
 
 ### GLM (z.ai / BigModel coding plan)
