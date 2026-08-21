@@ -67,6 +67,8 @@ struct AppSettings: Equatable, Codable {
     var launchAtLogin: Bool
     var chatgptAccounts: [ChatGPTAccount]
     var selectedChatGPTAccountId: UUID?
+    /// One-shot so existing 0.0.6 configs gain Grok without re-enabling it after the user hides it.
+    var didIntroduceGrok: Bool
 
     static let `default` = AppSettings(
         enabledProviders: ProviderKind.allCases,
@@ -77,7 +79,8 @@ struct AppSettings: Equatable, Codable {
         previewFixtures: false,
         launchAtLogin: false,
         chatgptAccounts: [],
-        selectedChatGPTAccountId: nil
+        selectedChatGPTAccountId: nil,
+        didIntroduceGrok: true
     )
 
     var visibleProviders: [ProviderKind] {
@@ -95,6 +98,12 @@ struct AppSettings: Equatable, Codable {
         if pollIntervalSeconds > 3600 { pollIntervalSeconds = 3600 }
         if enabledProviders.isEmpty {
             enabledProviders = ProviderKind.allCases
+        }
+        if !didIntroduceGrok {
+            if !enabledProviders.contains(.grok) {
+                enabledProviders.append(.grok)
+            }
+            didIntroduceGrok = true
         }
         if !enabledProviders.contains(selectedProvider) {
             selectedProvider = enabledProviders.first ?? .cursor

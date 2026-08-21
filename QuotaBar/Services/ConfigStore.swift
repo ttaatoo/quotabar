@@ -19,8 +19,9 @@ enum ConfigStore {
         if migratedLegacyChatGPT {
             shouldRewrite = true
         }
+        let beforeSanitize = settings
         settings.sanitize()
-        if shouldRewrite {
+        if shouldRewrite || settings != beforeSanitize {
             save(settings)
         }
         if configFileHasChatGPTAccounts() {
@@ -143,6 +144,7 @@ private struct ConfigFile: Codable {
     var launchAtLogin: Bool?
     var chatgptAccounts: [ChatGPTAccount]?
     var selectedChatGPTAccountId: UUID?
+    var didIntroduceGrok: Bool?
 
     /// Legacy / imported secrets. Written as null after migration.
     var glmApiKey: String?
@@ -159,6 +161,7 @@ private struct ConfigFile: Codable {
         launchAtLogin = settings.launchAtLogin
         chatgptAccounts = settings.chatgptAccounts
         selectedChatGPTAccountId = settings.selectedChatGPTAccountId
+        didIntroduceGrok = settings.didIntroduceGrok
         glmApiKey = nil
         cursorCookie = nil
         chatgptCookie = nil
@@ -175,6 +178,8 @@ private struct ConfigFile: Codable {
         if let launchAtLogin { value.launchAtLogin = launchAtLogin }
         if let chatgptAccounts { value.chatgptAccounts = chatgptAccounts }
         if let selectedChatGPTAccountId { value.selectedChatGPTAccountId = selectedChatGPTAccountId }
+        // Missing key = pre-Grok config. sanitize() appends Grok once.
+        value.didIntroduceGrok = didIntroduceGrok ?? false
         return value
     }
 }

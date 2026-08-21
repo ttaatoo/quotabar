@@ -6,6 +6,7 @@ enum KeychainAccount: Hashable {
     case chatgptCookie
     case chatgptJSON
     case glmAPIKey
+    case grokOAuthToken
     case chatgptAccountCookie(UUID)
     case chatgptAccountJSON(UUID)
 
@@ -19,6 +20,8 @@ enum KeychainAccount: Hashable {
             return "chatgpt.usage-json"
         case .glmAPIKey:
             return "glm.api-key"
+        case .grokOAuthToken:
+            return "grok.oauth-token"
         case .chatgptAccountCookie(let id):
             return "chatgpt.cookie.\(id.uuidString)"
         case .chatgptAccountJSON(let id):

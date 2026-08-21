@@ -12,7 +12,8 @@ enum FixtureLoader {
         var snapshot: UsageSnapshot
         switch provider {
         case .cursor:
-            snapshot = try CursorClient.parse(object, fetchedAt: now)
+            let email = JSONWalk.string(object, keys: ["email", "accountEmail"])
+            snapshot = try CursorClient.parse(object, fetchedAt: now, email: email)
         case .chatgpt:
             guard let parsed = ChatGPTClient.parseUsageObject(object, planName: nil, fetchedAt: now, source: .fixture) else {
                 throw QuotaError.schema("ChatGPT fixture had no usable windows.")
@@ -20,9 +21,16 @@ enum FixtureLoader {
             snapshot = parsed
         case .glm:
             snapshot = try GLMClient.parse(object, fetchedAt: now)
+        case .grok:
+            let email = JSONWalk.string(object, keys: ["email", "accountEmail"])
+            let plan = JSONWalk.string(object, keys: ["subscription_tier_display", "plan", "planName"])
+            snapshot = try GrokClient.parse(object, email: email, planFallback: plan, fetchedAt: now)
         }
         snapshot.source = .fixture
         snapshot.fetchedAt = now
+        if let email = snapshot.accountEmail ?? JSONWalk.string(object, keys: ["email", "accountEmail"]) {
+            snapshot.accountEmail = email
+        }
         if var session = snapshot.session {
             session.resetAt = now.addingTimeInterval((2 * 3600) + (49 * 60))
             snapshot.session = session

@@ -16,6 +16,7 @@ struct SettingsView: View {
                 cursorCard
                 chatgptCard
                 glmCard
+                grokCard
                 displayCard
                 aboutCard
             }
@@ -24,8 +25,10 @@ struct SettingsView: View {
         }
         .background(Theme.settingsPageFill)
         .frame(minWidth: Theme.settingsMinWidth, minHeight: Theme.settingsMinHeight)
+        .preferredColorScheme(.dark)
         .onChange(of: store.cursorCookie) { _, _ in store.persistSecrets() }
         .onChange(of: store.glmAPIKey) { _, _ in store.persistSecrets() }
+        .onChange(of: store.grokOAuthToken) { _, _ in store.persistSecrets() }
         .onChange(of: store.settings) { _, _ in
             store.persistSettings()
             store.restartPolling()
@@ -70,13 +73,14 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("QuotaBar")
                     .font(.system(size: 22, weight: .semibold))
-                Text("Remaining quota for Cursor, ChatGPT, and GLM — in the menu bar.")
+                    .foregroundStyle(Theme.primary)
+                Text("Remaining quota for Cursor, ChatGPT, GLM, and Grok — in the menu bar.")
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Text("Version \(appVersion)")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Theme.tertiary)
             }
         }
         .padding(.bottom, 2)
@@ -90,7 +94,7 @@ struct SettingsView: View {
             tint: Theme.logoBlue,
             hint: "Turn off a provider to hide it from the popover."
         ) {
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 ForEach(ProviderKind.allCases) { provider in
                     providerChip(provider)
                 }
@@ -108,13 +112,13 @@ struct SettingsView: View {
             if let email = store.cursorEmail, !email.isEmpty {
                 Text(email)
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.secondary)
                     .textSelection(.enabled)
             }
             SettingsSecretField(placeholder: "Cookie (optional)", text: $store.cursorCookie)
             Text("Or paste a WorkosCursorSessionToken / full Cookie header.")
                 .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.secondary)
         }
     }
 
@@ -129,16 +133,21 @@ struct SettingsView: View {
                 CodexLoginPresenter.shared.begin(store: store)
             } label: {
                 Label("Add account", systemImage: "plus")
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(Theme.primary)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: Theme.settingsHitTarget)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Theme.logoPurple.opacity(0.85))
+                    )
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.regular)
+            .buttonStyle(.plain)
 
             if store.settings.chatgptAccounts.isEmpty {
                 Text("No accounts yet.")
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 4)
             } else {
@@ -172,11 +181,48 @@ struct SettingsView: View {
         }
     }
 
+    private var grokCard: some View {
+        SettingsCard(
+            title: "Grok",
+            symbol: ProviderKind.grok.settingsSymbol,
+            tint: Theme.settingsTint(for: .grok),
+            hint: "QuotaBar reads ~/.grok/auth.json from `grok login`. It never writes or refreshes that file."
+        ) {
+            if let email = store.grokEmail, !email.isEmpty {
+                Text(email)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.secondary)
+                    .textSelection(.enabled)
+            } else {
+                Text("Not signed in. Run `grok login` in Terminal, then Refresh.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            SettingsSecretField(placeholder: "SuperGrok bearer (optional)", text: $store.grokOAuthToken)
+            if grokTokenRejected {
+                Text("Rejected: paste a SuperGrok bearer, not an xai- management key or cookie.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.warning)
+            } else {
+                Text("Optional if `grok login` already wrote ~/.grok/auth.json. Also accepted from GROK_OAUTH_TOKEN.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.secondary)
+            }
+        }
+    }
+
+    private var grokTokenRejected: Bool {
+        let raw = store.grokOAuthToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return false }
+        return GrokAuth.normalizedOAuthToken(raw) == nil
+    }
+
     private var displayCard: some View {
         SettingsCard(
             title: "Display",
             symbol: "slider.horizontal.3",
-            tint: Color.primary.opacity(0.65),
+            tint: Theme.secondary,
             hint: nil
         ) {
             Picker("Poll interval", selection: $store.settings.pollIntervalSeconds) {
@@ -191,6 +237,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Show")
                     .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.primary)
                 Picker("Show", selection: $store.settings.displayMode) {
                     ForEach(DisplayMode.allCases) { mode in
                         Text(mode.title).tag(mode)
@@ -203,11 +250,13 @@ struct SettingsView: View {
 
             Toggle("Launch at login", isOn: launchBinding)
                 .frame(minHeight: Theme.settingsHitTarget)
+                .tint(Theme.logoBlue)
             Toggle("Preview fixtures", isOn: $store.settings.previewFixtures)
                 .frame(minHeight: Theme.settingsHitTarget)
+                .tint(Theme.logoBlue)
             Text("Preview loads bundled sample JSON so the popover can be screenshot without accounts.")
                 .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.secondary)
         }
     }
 
@@ -215,20 +264,21 @@ struct SettingsView: View {
         SettingsCard(
             title: "About",
             symbol: "info.circle",
-            tint: Color.primary.opacity(0.55),
+            tint: Theme.secondary,
             hint: nil
         ) {
             HStack {
                 Text("Version")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.secondary)
                 Spacer()
                 Text(appVersion)
                     .font(.system(size: 13, weight: .medium).monospacedDigit())
+                    .foregroundStyle(Theme.primary)
             }
             .frame(minHeight: Theme.settingsHitTarget)
             Text("Unofficial usage endpoints can change without notice. Secrets stay in the Keychain; QuotaBar never phones home.")
                 .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -239,13 +289,14 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(account.displayTitle)
                         .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.primary)
                         .lineLimit(1)
                     if let email = account.email,
                        !email.isEmpty,
                        account.label.caseInsensitiveCompare(email) != .orderedSame {
                         Text(account.label)
                             .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.secondary)
                             .lineLimit(1)
                     }
                 }
@@ -264,12 +315,13 @@ struct SettingsView: View {
                     SettingsSecretField(placeholder: "Session cookie", text: cookieBinding(account.id))
                     Text("Optional pasted wham/usage JSON when the live API has no percentages.")
                         .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.secondary)
                     jsonEditor(for: account.id)
                 }
                 .padding(.top, 8)
             }
             .font(.system(size: 12))
+            .foregroundStyle(Theme.secondary)
         }
     }
 
@@ -279,26 +331,28 @@ struct SettingsView: View {
         return Button {
             store.setEnabled(provider, enabled: !on)
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: 4) {
                 Image(systemName: provider.settingsSymbol)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                 Text(provider.title)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
                 if on {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(size: 9, weight: .bold))
                 }
             }
-            .foregroundStyle(on ? Color.primary : Color.secondary)
+            .foregroundStyle(on ? Theme.primary : Theme.secondary)
             .frame(maxWidth: .infinity)
             .frame(minHeight: Theme.settingsHitTarget)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(on ? tint.opacity(0.16) : Color.primary.opacity(0.04))
+                    .fill(on ? tint.opacity(0.22) : Theme.fieldFill)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(on ? tint.opacity(0.35) : Theme.settingsHairline, lineWidth: 1)
+                    .strokeBorder(on ? tint.opacity(0.45) : Theme.settingsHairline, lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
@@ -314,11 +368,11 @@ struct SettingsView: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(destructive ? Color.red.opacity(0.85) : Color.secondary)
+                .foregroundStyle(destructive ? Color.red.opacity(0.85) : Theme.secondary)
                 .frame(width: Theme.settingsHitTarget, height: Theme.settingsHitTarget)
                 .background(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(Color.primary.opacity(0.05))
+                        .fill(Theme.fieldFill)
                 )
         }
         .buttonStyle(.plain)
@@ -341,12 +395,13 @@ struct SettingsView: View {
     private func jsonEditor(for id: UUID) -> some View {
         TextEditor(text: jsonBinding(id))
             .font(.system(.caption, design: .monospaced))
+            .foregroundStyle(Theme.primary)
             .scrollContentBackground(.hidden)
             .padding(8)
             .frame(minHeight: 80, maxHeight: 160)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color(nsColor: .textBackgroundColor))
+                    .fill(Theme.settingsFieldFill)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -406,6 +461,7 @@ private struct SettingsSecretField: View {
             }
             .textFieldStyle(.plain)
             .font(.system(size: 12.5))
+            .foregroundStyle(Theme.primary)
             .textContentType(.password)
             .focusEffectDisabled()
 
@@ -414,7 +470,7 @@ private struct SettingsSecretField: View {
             } label: {
                 Image(systemName: revealed ? "eye.slash" : "eye")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.secondary)
                     .frame(width: 22, height: 22)
                     .contentShape(Rectangle())
             }
@@ -450,16 +506,17 @@ private struct SettingsCard<Content: View>: View {
                     .frame(width: 26, height: 26)
                     .background(
                         RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(tint.opacity(0.14))
+                            .fill(tint.opacity(0.18))
                     )
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.primary)
                     if let hint = hint, !hint.isEmpty {
                         Text(hint)
                             .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -481,16 +538,17 @@ private struct SettingsCard<Content: View>: View {
 
 private struct QuotaBarSettingsMark: View {
     var body: some View {
-        HStack(alignment: .bottom, spacing: 3) {
+        HStack(alignment: .bottom, spacing: 2.5) {
             cap(Theme.logoBlue, 0.42)
-            cap(Theme.logoPurple, 0.68)
-            cap(Theme.logoGreen, 1.0)
+            cap(Theme.logoPurple, 0.62)
+            cap(Theme.logoGreen, 0.82)
+            cap(Theme.logoAmber, 1.0)
         }
         .padding(8)
         .frame(width: 36, height: 36)
         .background(
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(Color.primary.opacity(0.06))
+                .fill(Theme.fieldFill)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -502,6 +560,6 @@ private struct QuotaBarSettingsMark: View {
     private func cap(_ color: Color, _ height: CGFloat) -> some View {
         RoundedRectangle(cornerRadius: 1.2, style: .continuous)
             .fill(color)
-            .frame(width: 4.5, height: 18 * height)
+            .frame(width: 4, height: 18 * height)
     }
 }
