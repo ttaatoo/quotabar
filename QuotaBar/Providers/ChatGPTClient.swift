@@ -60,7 +60,7 @@ enum ChatGPTClient {
             }
         }
 
-        if let lastError as QuotaError, lastError.isAuthFailure {
+        if let lastError = lastError as? QuotaError, lastError.isAuthFailure {
             throw lastError
         }
 

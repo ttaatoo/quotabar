@@ -49,7 +49,7 @@ final class AppStore: ObservableObject {
         pollTimer?.invalidate()
         let interval = TimeInterval(settings.pollIntervalSeconds)
         pollTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [self] in
                 await self?.refreshAll()
             }
         }
@@ -62,7 +62,7 @@ final class AppStore: ObservableObject {
         clockTimer?.invalidate()
         now = Date()
         clockTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [self] in
                 self?.now = Date()
             }
         }
