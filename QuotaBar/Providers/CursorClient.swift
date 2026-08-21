@@ -33,25 +33,22 @@ enum CursorClient {
         }
 
         if unlimited {
-            let window = UsageWindow(
-                title: "Session",
-                remainingPercent: 100,
-                usedPercent: 0,
-                resetAt: cycleEnd,
-                extra: extra,
-                unlimited: true
-            )
             return UsageSnapshot(
                 provider: .cursor,
                 planName: planName,
                 fetchedAt: fetchedAt,
-                session: window,
-                weekly: UsageWindow(
-                    title: "Weekly",
+                session: UsageWindow(
+                    title: "Cursor Models",
                     remainingPercent: 100,
                     usedPercent: 0,
                     resetAt: cycleEnd,
-                    extra: extra,
+                    unlimited: true
+                ),
+                weekly: UsageWindow(
+                    title: "Other Models",
+                    remainingPercent: 100,
+                    usedPercent: 0,
+                    resetAt: cycleEnd,
                     unlimited: true
                 ),
                 source: .live,
@@ -60,60 +57,36 @@ enum CursorClient {
         }
 
         if let plan = individualPlan(raw) {
-            let sessionRemaining = Percent.remaining(used: plan.autoPercentUsed)
-            let weeklyRemaining: Double
-            if let used = plan.used, let limit = plan.limit, limit > 0 {
-                weeklyRemaining = ((limit - used) / limit) * 100
-            } else {
-                weeklyRemaining = Percent.remaining(used: plan.totalPercentUsed)
-            }
-
             return UsageSnapshot(
                 provider: .cursor,
                 planName: planName,
                 fetchedAt: fetchedAt,
-                session: UsageWindow(
-                    title: "Session",
-                    remainingPercent: sessionRemaining,
-                    usedPercent: plan.autoPercentUsed,
-                    resetAt: cycleEnd,
-                    extra: extra
-                ),
-                weekly: UsageWindow(
-                    title: "Weekly",
-                    remainingPercent: weeklyRemaining,
-                    usedPercent: 100 - weeklyRemaining,
-                    resetAt: cycleEnd,
-                    extra: extra
-                ),
+                session: cursorModelsWindow(usedPercent: plan.autoPercentUsed, resetAt: cycleEnd),
+                weekly: otherModelsWindow(usedPercent: plan.apiPercentUsed, resetAt: cycleEnd),
                 source: .live,
                 extraFooter: extra
             )
         }
 
-        if let auto = raw["autoModelSelectedDisplayMessage"] as? String,
-           let named = raw["namedModelSelectedDisplayMessage"] as? String,
-           let autoUsed = Percent.parseMessage(auto),
-           let namedUsed = Percent.parseMessage(named) {
-            let weeklyUsed = max(autoUsed, namedUsed)
+        let autoUsed: Double?
+        if let message = raw["autoModelSelectedDisplayMessage"] as? String {
+            autoUsed = Percent.parseMessage(message)
+        } else {
+            autoUsed = nil
+        }
+        let namedUsed: Double?
+        if let message = raw["namedModelSelectedDisplayMessage"] as? String {
+            namedUsed = Percent.parseMessage(message)
+        } else {
+            namedUsed = nil
+        }
+        if autoUsed != nil || namedUsed != nil {
             return UsageSnapshot(
                 provider: .cursor,
                 planName: "\(planName) team",
                 fetchedAt: fetchedAt,
-                session: UsageWindow(
-                    title: "Session",
-                    remainingPercent: Percent.remaining(used: autoUsed),
-                    usedPercent: autoUsed,
-                    resetAt: cycleEnd,
-                    extra: extra
-                ),
-                weekly: UsageWindow(
-                    title: "Weekly",
-                    remainingPercent: Percent.remaining(used: weeklyUsed),
-                    usedPercent: weeklyUsed,
-                    resetAt: cycleEnd,
-                    extra: extra
-                ),
+                session: cursorModelsWindow(usedPercent: autoUsed, resetAt: cycleEnd),
+                weekly: otherModelsWindow(usedPercent: namedUsed, resetAt: cycleEnd),
                 source: .live,
                 extraFooter: extra
             )
@@ -122,11 +95,29 @@ enum CursorClient {
         throw QuotaError.schema("Cursor usage-summary did not include plan percentages.")
     }
 
+    private static func cursorModelsWindow(usedPercent: Double?, resetAt: Date?) -> UsageWindow? {
+        guard let usedPercent else { return nil }
+        return UsageWindow(
+            title: "Cursor Models",
+            remainingPercent: Percent.remaining(used: usedPercent),
+            usedPercent: Percent.clamp(usedPercent),
+            resetAt: resetAt
+        )
+    }
+
+    private static func otherModelsWindow(usedPercent: Double?, resetAt: Date?) -> UsageWindow? {
+        guard let usedPercent else { return nil }
+        return UsageWindow(
+            title: "Other Models",
+            remainingPercent: Percent.remaining(used: usedPercent),
+            usedPercent: Percent.clamp(usedPercent),
+            resetAt: resetAt
+        )
+    }
+
     private struct PlanFields {
-        var autoPercentUsed: Double
-        var totalPercentUsed: Double
-        var used: Double?
-        var limit: Double?
+        var autoPercentUsed: Double?
+        var apiPercentUsed: Double?
     }
 
     private struct OnDemandFields {
@@ -151,22 +142,9 @@ enum CursorClient {
         else { return nil }
 
         let auto = JSONNumber.double(from: plan["autoPercentUsed"])
-        let total = JSONNumber.double(from: plan["totalPercentUsed"])
-        if let auto, let total {
-            return PlanFields(
-                autoPercentUsed: auto,
-                totalPercentUsed: total,
-                used: JSONNumber.double(from: plan["used"]),
-                limit: JSONNumber.double(from: plan["limit"])
-            )
-        }
-        if let used = JSONNumber.double(from: plan["used"]),
-           let limit = JSONNumber.double(from: plan["limit"]),
-           limit > 0 {
-            let percent = (used / limit) * 100
-            return PlanFields(autoPercentUsed: percent, totalPercentUsed: percent, used: used, limit: limit)
-        }
-        return nil
+        let api = JSONNumber.double(from: plan["apiPercentUsed"])
+        if auto == nil && api == nil { return nil }
+        return PlanFields(autoPercentUsed: auto, apiPercentUsed: api)
     }
 
     private static func individualOnDemand(_ raw: [String: Any]) -> OnDemandFields? {

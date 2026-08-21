@@ -4,10 +4,9 @@ import SwiftUI
 enum SettingsPresenter {
     @MainActor
     static func open() {
-        NSApp.activate(ignoringOtherApps: true)
-        if NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) {
-            return
-        }
+        // Always the custom controller. `showSettingsWindow:` can return true
+        // for the unused SwiftUI Settings scene without ordering this window
+        // front — a second click then does nothing in an LSUIElement app.
         SettingsWindowController.shared.show()
     }
 }
@@ -20,10 +19,10 @@ final class SettingsWindowController: NSWindowController {
         let view = SettingsView(store: AppStore.shared)
         let hosting = NSHostingController(rootView: view)
         let window = NSWindow(contentViewController: hosting)
-        window.title = "QuotaBar Settings"
+        window.title = "Settings"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.setContentSize(NSSize(width: 460, height: 700))
-        window.contentMinSize = NSSize(width: 420, height: 560)
+        window.setContentSize(NSSize(width: Theme.settingsColumnWidth, height: 720))
+        window.contentMinSize = NSSize(width: Theme.settingsMinWidth, height: Theme.settingsMinHeight)
         window.isReleasedWhenClosed = false
         window.level = .floating
         super.init(window: window)
@@ -33,8 +32,18 @@ final class SettingsWindowController: NSWindowController {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func show() {
-        window?.center()
-        window?.makeKeyAndOrderFront(nil)
+        guard let window = window else { return }
         NSApp.activate(ignoringOtherApps: true)
+        if window.isMiniaturized {
+            window.deminiaturize(nil)
+        }
+        if window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
+            return
+        }
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
     }
 }

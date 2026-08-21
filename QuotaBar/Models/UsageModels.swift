@@ -69,6 +69,114 @@ struct UsageSnapshot: Equatable {
     }
 }
 
+/// ChatGPT / `wham/usage` lanes by **duration**, not primary/secondary slot.
+/// Plus and Codex often put a 7-day (10080 min) window in `primary` with no 5-hour session.
+enum QuotaWindowKind: String, Equatable {
+    case session
+    case weekly
+    case monthly
+
+    var title: String {
+        switch self {
+        case .session: return "Session"
+        case .weekly: return "Weekly"
+        case .monthly: return "Monthly"
+        }
+    }
+
+    struct Classified: Equatable {
+        var kind: QuotaWindowKind
+        var window: UsageWindow
+        var durationSeconds: TimeInterval?
+    }
+
+    /// ≤ ~12h → Session; ~3–14d (incl. 10080 min) → Weekly; ~30d (43200 min) → Monthly.
+    static func fromDuration(_ seconds: TimeInterval) -> QuotaWindowKind? {
+        guard seconds > 0 else { return nil }
+        if seconds <= 12 * 3600 { return .session }
+        if seconds >= 20 * 86_400 { return .monthly }
+        if seconds >= 3 * 86_400 { return .weekly }
+        return nil
+    }
+
+    /// A reset days away is Weekly (or Monthly if ~20d+), never Session.
+    static func fromReset(_ resetAt: Date?, now: Date) -> QuotaWindowKind? {
+        guard let resetAt else { return nil }
+        let remaining = resetAt.timeIntervalSince(now)
+        if remaining <= 0 { return nil }
+        if remaining <= 12 * 3600 { return .session }
+        if remaining >= 20 * 86_400 { return .monthly }
+        if remaining >= 86_400 { return .weekly }
+        return nil
+    }
+
+    static func classify(durationSeconds: TimeInterval?, resetAt: Date?, now: Date) -> QuotaWindowKind? {
+        if let durationSeconds = durationSeconds, let kind = fromDuration(durationSeconds) {
+            return kind
+        }
+        return fromReset(resetAt, now: now)
+    }
+
+    static func durationSeconds(from object: [String: Any]) -> TimeInterval? {
+        let minuteKeys = [
+            "windowDurationMins", "window_duration_mins",
+            "window_minutes", "windowMinutes", "window_duration_minutes"
+        ]
+        for key in minuteKeys {
+            if let mins = JSONNumber.double(from: object[key]), mins > 0 {
+                return mins * 60
+            }
+        }
+        let secondKeys = [
+            "limit_window_seconds", "window_seconds",
+            "windowSeconds", "limitWindowSeconds"
+        ]
+        for key in secondKeys {
+            if let seconds = JSONNumber.double(from: object[key]), seconds > 0 {
+                return seconds
+            }
+        }
+        if let value = JSONNumber.double(from: object["message_cap_window"]), value > 0 {
+            // Historical conversation_limit used minutes when the value is small.
+            if value <= 24 * 60 {
+                return value * 60
+            }
+            return value
+        }
+        return nil
+    }
+
+    /// Slot 1 stays Session (disabled “—” when there is no 5h window).
+    /// Slot 2 is Weekly, or Monthly when that is the only longer window.
+    /// A lone ChatGPT window that is not a real ≤12h session is Weekly (or Monthly).
+    static func assignChatGPTSlots(_ items: [Classified]) -> (session: UsageWindow?, longer: UsageWindow?) {
+        if items.count == 1, let only = items.first {
+            if only.kind == .session,
+               let duration = only.durationSeconds,
+               duration > 0,
+               duration <= 12 * 3600 {
+                return (only.window, nil)
+            }
+            var window = only.window
+            if only.kind == .monthly {
+                window.title = QuotaWindowKind.monthly.title
+                return (nil, window)
+            }
+            window.title = QuotaWindowKind.weekly.title
+            return (nil, window)
+        }
+
+        let session = items.first(where: { $0.kind == .session })?.window
+        if let weekly = items.first(where: { $0.kind == .weekly })?.window {
+            return (session, weekly)
+        }
+        if let monthly = items.first(where: { $0.kind == .monthly })?.window {
+            return (session, monthly)
+        }
+        return (session, nil)
+    }
+}
+
 enum ProviderLoadState: Equatable {
     case idle
     case loading

@@ -457,8 +457,29 @@ enum ChatGPTClient {
         candidates = dedupe(candidates)
         guard !candidates.isEmpty else { return nil }
 
-        let session = pickSession(from: candidates)
-        let weekly = pickWeekly(from: candidates, excluding: session)
+        let classified = candidates.map { candidate -> QuotaWindowKind.Classified in
+            let duration = candidate.windowSeconds
+            let kind: QuotaWindowKind
+            if let duration = duration, let fromDuration = QuotaWindowKind.fromDuration(duration) {
+                kind = fromDuration
+            } else if candidate.title == "Session" {
+                kind = .session
+            } else if candidate.title == "Weekly" {
+                kind = .weekly
+            } else if candidate.title == "Monthly" {
+                kind = .monthly
+            } else {
+                kind = QuotaWindowKind.classify(
+                    durationSeconds: duration,
+                    resetAt: candidate.resetAt,
+                    now: fetchedAt
+                ) ?? .weekly
+            }
+            var window = toWindow(candidate, fallbackTitle: kind.title)
+            window.title = kind.title
+            return QuotaWindowKind.Classified(kind: kind, window: window, durationSeconds: duration)
+        }
+        let slots = QuotaWindowKind.assignChatGPTSlots(classified)
         let plan = planName
             ?? JSONWalk.string(raw, keys: ["plan", "planName", "plan_type", "planType"])
             .map(humanPlanName)
@@ -467,16 +488,17 @@ enum ChatGPTClient {
             provider: .chatgpt,
             planName: plan,
             fetchedAt: fetchedAt,
-            session: session.map { toWindow($0, fallbackTitle: "Session") },
-            weekly: weekly.map { toWindow($0, fallbackTitle: "Weekly") },
+            session: slots.session,
+            weekly: slots.longer,
             source: source,
             extraFooter: nil
         )
     }
 
-    /// CodexBar-shaped `wham/usage`: `rate_limit.primary_window` (Session) and
-    /// `secondary_window` (Weekly). Requires `used_percent` — never invents a bar
-    /// from `credits` alone.
+    /// CodexBar-shaped `wham/usage`. Classify each window by duration
+    /// (`limit_window_seconds` / `window_seconds` / `windowDurationMins`),
+    /// not by primary → Session / secondary → Weekly. Requires `used_percent` —
+    /// never invents a bar from `credits` alone.
     private static func parseWhamUsage(
         _ raw: [String: Any],
         email: String?,
@@ -487,20 +509,27 @@ enum ChatGPTClient {
         let rateLimit: [String: Any]
         if let nested = raw["rate_limit"] as? [String: Any] {
             rateLimit = nested
-        } else if raw["primary_window"] != nil || raw["secondary_window"] != nil {
+        } else if raw["primary_window"] != nil || raw["secondary_window"] != nil
+                    || raw["primaryWindow"] != nil || raw["secondaryWindow"] != nil {
             rateLimit = raw
         } else {
             return nil
         }
 
-        let primaryObject = rateLimit["primary_window"] as? [String: Any]
-            ?? rateLimit["primaryWindow"] as? [String: Any]
-        let secondaryObject = rateLimit["secondary_window"] as? [String: Any]
-            ?? rateLimit["secondaryWindow"] as? [String: Any]
-        let primary = windowFromRateLimit(primaryObject, fallbackTitle: "Session")
-        let secondary = windowFromRateLimit(secondaryObject, fallbackTitle: "Weekly")
-        guard primary != nil || secondary != nil else { return nil }
+        var objects: [[String: Any]] = []
+        for key in ["primary_window", "primaryWindow", "secondary_window", "secondaryWindow"] {
+            if let object = rateLimit[key] as? [String: Any] {
+                objects.append(object)
+            }
+        }
+        objects = dedupeRateLimitObjects(objects)
 
+        let classified = objects.compactMap { object in
+            classifiedRateLimitWindow(object, now: fetchedAt)
+        }
+        guard !classified.isEmpty else { return nil }
+
+        let slots = QuotaWindowKind.assignChatGPTSlots(classified)
         let plan = JSONWalk.string(raw, keys: ["plan_type", "planType", "plan"])
             .map(humanPlanName)
             ?? fallbackPlan
@@ -509,8 +538,8 @@ enum ChatGPTClient {
             provider: .chatgpt,
             planName: plan,
             fetchedAt: fetchedAt,
-            session: primary,
-            weekly: secondary,
+            session: slots.session,
+            weekly: slots.longer,
             source: source,
             extraFooter: creditsFooter(from: raw)
         )
@@ -518,25 +547,53 @@ enum ChatGPTClient {
         return snapshot
     }
 
-    private static func windowFromRateLimit(_ object: [String: Any]?, fallbackTitle: String) -> UsageWindow? {
-        guard let object else { return nil }
+    private static func classifiedRateLimitWindow(
+        _ object: [String: Any],
+        now: Date
+    ) -> QuotaWindowKind.Classified? {
         guard let used = JSONNumber.double(from: object["used_percent"] ?? object["usedPercent"]) else {
             return nil
         }
-        let remaining = Percent.remaining(used: used)
-        let reset = TimeFormatting.parseDate(object["reset_at"] ?? object["resetAt"])
-        return UsageWindow(
-            title: fallbackTitle,
-            remainingPercent: remaining,
+        let reset = TimeFormatting.parseDate(
+            object["reset_at"]
+                ?? object["resetAt"]
+                ?? object["resets_at"]
+                ?? object["resetsAt"]
+        )
+        let duration = QuotaWindowKind.durationSeconds(from: object)
+        let kind = QuotaWindowKind.classify(
+            durationSeconds: duration,
+            resetAt: reset,
+            now: now
+        ) ?? .weekly
+        let window = UsageWindow(
+            title: kind.title,
+            remainingPercent: Percent.remaining(used: used),
             usedPercent: Percent.clamp(used),
             resetAt: reset
         )
+        return QuotaWindowKind.Classified(kind: kind, window: window, durationSeconds: duration)
+    }
+
+    private static func dedupeRateLimitObjects(_ objects: [[String: Any]]) -> [[String: Any]] {
+        var seen: [String] = []
+        var result: [[String: Any]] = []
+        for object in objects {
+            let used = JSONNumber.double(from: object["used_percent"] ?? object["usedPercent"]) ?? -1
+            let reset = TimeFormatting.parseDate(
+                object["reset_at"] ?? object["resetAt"] ?? object["resets_at"] ?? object["resetsAt"]
+            )?.timeIntervalSince1970 ?? -1
+            let duration = QuotaWindowKind.durationSeconds(from: object) ?? -1
+            let key = "\(used)-\(reset)-\(duration)"
+            if seen.contains(key) { continue }
+            seen.append(key)
+            result.append(object)
+        }
+        return result
     }
 
     private static func titleForWindowSeconds(_ seconds: Double, fallback: String) -> String {
-        if seconds > 0 && seconds <= 12 * 3600 { return "Session" }
-        if seconds >= 3 * 86_400 { return "Weekly" }
-        return fallback
+        QuotaWindowKind.fromDuration(seconds)?.title ?? fallback
     }
 
     /// Footer only — never a percent bar.
@@ -627,17 +684,7 @@ enum ChatGPTClient {
         if reset == nil, let seconds = JSONNumber.double(from: object["reset_after_seconds"] ?? object["resetAfterSeconds"]), seconds > 0, seconds < 1_000_000 {
             reset = Date().addingTimeInterval(seconds)
         }
-        let windowSeconds = JSONNumber.double(
-            from: object["limit_window_seconds"]
-                ?? object["window_seconds"]
-                ?? object["message_cap_window"]
-        ).map { value -> TimeInterval in
-            // Historical conversation_limit used minutes for message_cap_window.
-            if value > 0 && value <= 24 * 60 && object["message_cap_window"] != nil {
-                return value * 60
-            }
-            return value
-        }
+        let windowSeconds = QuotaWindowKind.durationSeconds(from: object)
 
         let title = inferTitle(key: key, object: object, windowSeconds: windowSeconds)
         return CandidateWindow(
@@ -666,6 +713,7 @@ enum ChatGPTClient {
             object["type"] as? String
         ]).compactMap { $0 }.joined(separator: " ").lowercased()
 
+        if blob.contains("month") { return "Monthly" }
         if blob.contains("week") || blob.contains("thinking") { return "Weekly" }
         if blob.contains("session") || blob.contains("5") || blob.contains("3-hour") || blob.contains("3h") {
             return "Session"
@@ -674,23 +722,6 @@ enum ChatGPTClient {
             return titleForWindowSeconds(seconds, fallback: key.flatMap { $0.isEmpty ? nil : TitleCase.words($0) } ?? "Usage")
         }
         return key.flatMap { $0.isEmpty ? nil : TitleCase.words($0) } ?? "Usage"
-    }
-
-    private static func pickSession(from candidates: [CandidateWindow]) -> CandidateWindow? {
-        if let named = candidates.first(where: { $0.title == "Session" }) { return named }
-        let short = candidates
-            .filter { ($0.windowSeconds ?? .greatestFiniteMagnitude) <= 12 * 3600 }
-            .sorted { ($0.windowSeconds ?? 0) < ($1.windowSeconds ?? 0) }
-        return short.first ?? candidates.min(by: { ($0.windowSeconds ?? 0) < ($1.windowSeconds ?? .greatestFiniteMagnitude) })
-    }
-
-    private static func pickWeekly(from candidates: [CandidateWindow], excluding session: CandidateWindow?) -> CandidateWindow? {
-        let rest = candidates.filter { candidate in
-            guard let session else { return true }
-            return !(candidate.remaining == session.remaining && candidate.used == session.used && candidate.resetAt == session.resetAt)
-        }
-        if let named = rest.first(where: { $0.title == "Weekly" }) { return named }
-        return rest.max(by: { ($0.windowSeconds ?? 0) < ($1.windowSeconds ?? 0) })
     }
 
     private static func dedupe(_ candidates: [CandidateWindow]) -> [CandidateWindow] {
