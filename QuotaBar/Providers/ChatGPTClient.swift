@@ -3,28 +3,135 @@ import Foundation
 enum ChatGPTClient {
     private static let sessionCookieName = "__Secure-next-auth.session-token"
 
+    private static let whamURLs = [
+        "https://chatgpt.com/backend-api/wham/usage",
+        "https://chat.openai.com/backend-api/wham/usage"
+    ]
+
+    private static let conversationLimitURLs = [
+        "https://chatgpt.com/backend-api/conversation_limit",
+        "https://chatgpt.com/public-api/conversation_limit"
+    ]
+
     static func fetch(cookie pasted: String?, pastedJSON: String?, now: Date = Date()) async throws -> UsageSnapshot {
-        if let cookie = normalizeCookie(pasted) {
+        let cookie = normalizeCookie(pasted)
+        var lastError: Error?
+        var cookieIdentity: Identity?
+        var cookieUnauthorized = false
+        var codexTokens: CodexCLIAuth.Tokens?
+        var triedCodexAuth = false
+        var gotJSONWithoutWindows = false
+
+        if let cookie {
             do {
-                return try await fetchLive(cookie: cookie, now: now)
+                let identity = try await fetchSession(cookie: cookie)
+                cookieIdentity = identity
+                do {
+                    if let snapshot = try await requestWhamUsage(
+                        accessToken: identity.accessToken,
+                        cookie: cookie,
+                        accountId: identity.accountId,
+                        email: identity.email,
+                        planName: identity.planName,
+                        now: now
+                    ) {
+                        return snapshot
+                    }
+                    gotJSONWithoutWindows = true
+                } catch let error as QuotaError where error.isAuthFailure {
+                    cookieUnauthorized = true
+                    lastError = error
+                } catch {
+                    lastError = error
+                }
             } catch let error as QuotaError where error.isAuthFailure {
-                if let pastedJSON, let snapshot = try? parsePastedOrOfficial(pastedJSON, fetchedAt: now, source: .pastedJSON) {
-                    return snapshot
-                }
-                throw error
+                cookieUnauthorized = true
+                lastError = error
             } catch {
-                if let pastedJSON, let snapshot = try? parsePastedOrOfficial(pastedJSON, fetchedAt: now, source: .pastedJSON) {
-                    return snapshot
-                }
-                throw error
+                lastError = error
             }
         }
 
-        if let pastedJSON {
-            return try parsePastedOrOfficial(pastedJSON, fetchedAt: now, source: .pastedJSON)
+        if cookie == nil || cookieUnauthorized {
+            triedCodexAuth = true
+            if let tokens = CodexCLIAuth.read() {
+                codexTokens = tokens
+                do {
+                    if let snapshot = try await requestWhamUsage(
+                        accessToken: tokens.accessToken,
+                        cookie: nil,
+                        accountId: tokens.accountId,
+                        email: tokens.email ?? cookieIdentity?.email,
+                        planName: tokens.planName ?? cookieIdentity?.planName,
+                        now: now
+                    ) {
+                        return snapshot
+                    }
+                    gotJSONWithoutWindows = true
+                } catch let error as QuotaError where error.isAuthFailure {
+                    lastError = error
+                } catch {
+                    lastError = error
+                }
+            }
         }
 
-        throw QuotaError.notSignedIn("Sign in to ChatGPT in Settings, or paste a session cookie / conversation_limit JSON.")
+        let fallbackToken = cookieIdentity?.accessToken ?? codexTokens?.accessToken
+        let fallbackCookie = cookieIdentity == nil ? nil : cookie
+        let fallbackAccountId = cookieIdentity?.accountId ?? codexTokens?.accountId
+        let fallbackEmail = cookieIdentity?.email ?? codexTokens?.email
+        var fallbackPlan = cookieIdentity?.planName ?? codexTokens?.planName
+
+        if let fallbackToken {
+            if fallbackPlan == nil {
+                fallbackPlan = try? await fetchPlanName(accessToken: fallbackToken, accountId: fallbackAccountId)
+            }
+            do {
+                if let snapshot = try await fetchConversationLimit(
+                    accessToken: fallbackToken,
+                    cookie: fallbackCookie,
+                    accountId: fallbackAccountId,
+                    email: fallbackEmail,
+                    planName: fallbackPlan,
+                    now: now
+                ) {
+                    return snapshot
+                }
+                gotJSONWithoutWindows = true
+            } catch {
+                lastError = error
+            }
+        }
+
+        if let pastedJSON, let snapshot = try? parsePastedOrOfficial(pastedJSON, fetchedAt: now, source: .pastedJSON) {
+            return snapshot
+        }
+
+        if let lastError = lastError as? QuotaError, lastError.isAuthFailure, !gotJSONWithoutWindows {
+            throw lastError
+        }
+
+        if cookie == nil && codexTokens == nil {
+            if let pastedJSON {
+                return try parsePastedOrOfficial(pastedJSON, fetchedAt: now, source: .pastedJSON)
+            }
+            throw QuotaError.notSignedIn(
+                "Run `codex login` (QuotaBar reads ~/.codex/auth.json the same way CodexBar does), sign in to ChatGPT in Settings, or paste a session cookie / usage JSON."
+            )
+        }
+
+        if let lastError, !gotJSONWithoutWindows {
+            throw lastError
+        }
+
+        let who = fallbackEmail.map { " as \($0)" } ?? ""
+        let plan = fallbackPlan.map { " (\($0))" } ?? ""
+        let codexHint = triedCodexAuth && codexTokens == nil
+            ? " No readable ~/.codex/auth.json (from `codex login`) was found."
+            : ""
+        throw QuotaError.noUsableQuota(
+            "Signed in\(who)\(plan), but ChatGPT did not publish remaining/used percentages on wham/usage (or conversation_limit). CodexBar uses GET /backend-api/wham/usage with tokens from `codex login` (~/.codex/auth.json). QuotaBar does not invent numbers.\(codexHint)"
+        )
     }
 
     struct SessionInfo: Equatable {
@@ -96,49 +203,6 @@ enum ChatGPTClient {
         return true
     }
 
-    private static func fetchLive(cookie: String, now: Date) async throws -> UsageSnapshot {
-        let identity = try await fetchSession(cookie: cookie)
-        var planName = identity.planName
-
-        if planName == nil {
-            planName = try? await fetchPlanName(accessToken: identity.accessToken)
-        }
-
-        let candidates = [
-            "https://chatgpt.com/backend-api/conversation_limit",
-            "https://chatgpt.com/public-api/conversation_limit"
-        ]
-
-        var lastError: Error?
-        for urlString in candidates {
-            guard let url = URL(string: urlString) else { continue }
-            do {
-                let (data, response) = try await HTTPClient.get(
-                    url: url,
-                    headers: bearerHeaders(identity.accessToken, cookie: cookie)
-                )
-                if response.statusCode == 404 { continue }
-                try HTTPClient.requireOK(response, data: data, host: "chatgpt.com")
-                let object = try JSONWalk.object(from: data)
-                if var snapshot = parseUsageObject(object, planName: planName, fetchedAt: now, source: .live) {
-                    snapshot.accountEmail = identity.email
-                    return snapshot
-                }
-                lastError = QuotaError.noUsableQuota("ChatGPT \(url.lastPathComponent) returned JSON without remaining/used percentages.")
-            } catch {
-                lastError = error
-            }
-        }
-
-        if let lastError = lastError as? QuotaError, lastError.isAuthFailure {
-            throw lastError
-        }
-
-        throw QuotaError.noUsableQuota(
-            "Signed in\(identity.email.map { " as \($0)" } ?? "")\(planName.map { " (\($0))" } ?? ""), but ChatGPT did not publish remaining quota on conversation_limit. Paste that response JSON from DevTools in Settings. Numbers are never invented."
-        )
-    }
-
     static func parsePastedOrOfficial(_ raw: String, fetchedAt: Date, source: SnapshotSource) throws -> UsageSnapshot {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -151,7 +215,9 @@ enum ChatGPTClient {
         if let snapshot = parseUsageObject(object, planName: nil, fetchedAt: fetchedAt, source: source) {
             return snapshot
         }
-        throw QuotaError.noUsableQuota("Could not find remaining/used percentages in the pasted ChatGPT JSON.")
+        throw QuotaError.noUsableQuota(
+            "Could not find remaining/used percentages in the pasted ChatGPT JSON. CodexBar uses GET /backend-api/wham/usage with ~/.codex/auth.json from `codex login`; QuotaBar does not invent numbers."
+        )
     }
 
     // MARK: - Auth
@@ -160,6 +226,7 @@ enum ChatGPTClient {
         var accessToken: String
         var email: String?
         var planName: String?
+        var accountId: String?
     }
 
     private static func fetchSession(cookie: String) async throws -> Identity {
@@ -184,13 +251,17 @@ enum ChatGPTClient {
         return Identity(
             accessToken: accessToken,
             email: user?["email"] as? String,
-            planName: plan.map(humanPlanName)
+            planName: plan.map(humanPlanName),
+            accountId: accountId(fromSession: object, accessToken: accessToken)
         )
     }
 
-    private static func fetchPlanName(accessToken: String) async throws -> String {
+    private static func fetchPlanName(accessToken: String, accountId: String?) async throws -> String {
         let url = URL(string: "https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27")!
-        let (data, response) = try await HTTPClient.get(url: url, headers: bearerHeaders(accessToken, cookie: nil))
+        let (data, response) = try await HTTPClient.get(
+            url: url,
+            headers: bearerHeaders(accessToken, cookie: nil, accountId: accountId)
+        )
         try HTTPClient.requireOK(response, data: data, host: "chatgpt.com")
         let object = try JSONWalk.object(from: data)
         let entitlements = JSONWalk.dictionaries(in: object)
@@ -203,13 +274,16 @@ enum ChatGPTClient {
         throw QuotaError.schema("No plan on accounts/check.")
     }
 
-    private static func bearerHeaders(_ accessToken: String, cookie: String?) -> [String: String] {
+    private static func bearerHeaders(_ accessToken: String, cookie: String?, accountId: String?) -> [String: String] {
         var headers = [
             "Authorization": "Bearer \(accessToken)",
             "Origin": "https://chatgpt.com",
             "Referer": "https://chatgpt.com/"
         ]
         if let cookie { headers["Cookie"] = cookie }
+        if let accountId = nonEmpty(accountId) {
+            headers["ChatGPT-Account-Id"] = accountId
+        }
         return headers
     }
 
@@ -240,6 +314,108 @@ enum ChatGPTClient {
         }
     }
 
+    // MARK: - Live usage
+
+    /// Returns a snapshot when `wham/usage` includes usable rate-limit windows.
+    /// 401/403 throw. 200/404 without percentages return `nil` so callers can fall back.
+    private static func requestWhamUsage(
+        accessToken: String,
+        cookie: String?,
+        accountId: String?,
+        email: String?,
+        planName: String?,
+        now: Date
+    ) async throws -> UsageSnapshot? {
+        var lastError: Error?
+        var sawJSONWithoutWindows = false
+
+        for urlString in whamURLs {
+            guard let url = URL(string: urlString) else { continue }
+            do {
+                let (data, response) = try await HTTPClient.get(
+                    url: url,
+                    headers: bearerHeaders(accessToken, cookie: cookie, accountId: accountId)
+                )
+                if response.statusCode == 401 || response.statusCode == 403 {
+                    throw QuotaError.unauthorized(
+                        "\(url.host ?? "chatgpt.com") rejected the session (\(response.statusCode))."
+                    )
+                }
+                if response.statusCode == 404 { continue }
+                try HTTPClient.requireOK(response, data: data, host: url.host ?? "chatgpt.com")
+                let object = try JSONWalk.object(from: data)
+                if let snapshot = parseWhamUsage(
+                    object,
+                    email: email,
+                    fallbackPlan: planName,
+                    fetchedAt: now,
+                    source: .live
+                ) {
+                    return snapshot
+                }
+                sawJSONWithoutWindows = true
+            } catch let error as QuotaError where error.isAuthFailure {
+                throw error
+            } catch {
+                lastError = error
+            }
+        }
+
+        if sawJSONWithoutWindows {
+            return nil
+        }
+        if let lastError {
+            throw lastError
+        }
+        return nil
+    }
+
+    private static func fetchConversationLimit(
+        accessToken: String,
+        cookie: String?,
+        accountId: String?,
+        email: String?,
+        planName: String?,
+        now: Date
+    ) async throws -> UsageSnapshot? {
+        var lastError: Error?
+        var sawJSONWithoutWindows = false
+
+        for urlString in conversationLimitURLs {
+            guard let url = URL(string: urlString) else { continue }
+            do {
+                let (data, response) = try await HTTPClient.get(
+                    url: url,
+                    headers: bearerHeaders(accessToken, cookie: cookie, accountId: accountId)
+                )
+                if response.statusCode == 404 { continue }
+                try HTTPClient.requireOK(response, data: data, host: url.host ?? "chatgpt.com")
+                let object = try JSONWalk.object(from: data)
+                if var snapshot = parseUsageObject(object, planName: planName, fetchedAt: now, source: .live) {
+                    snapshot.accountEmail = email
+                    return snapshot
+                }
+                sawJSONWithoutWindows = true
+                lastError = QuotaError.noUsableQuota(
+                    "ChatGPT \(url.lastPathComponent) returned JSON without remaining/used percentages."
+                )
+            } catch {
+                lastError = error
+            }
+        }
+
+        if let lastError = lastError as? QuotaError, lastError.isAuthFailure {
+            throw lastError
+        }
+        if sawJSONWithoutWindows {
+            return nil
+        }
+        if let lastError {
+            throw lastError
+        }
+        return nil
+    }
+
     // MARK: - Parsing
 
     private struct CandidateWindow {
@@ -257,6 +433,16 @@ enum ChatGPTClient {
         fetchedAt: Date,
         source: SnapshotSource
     ) -> UsageSnapshot? {
+        if let snapshot = parseWhamUsage(
+            raw,
+            email: nil,
+            fallbackPlan: planName,
+            fetchedAt: fetchedAt,
+            source: source
+        ) {
+            return snapshot
+        }
+
         if let snapshot = parseCanonical(raw, fallbackPlan: planName, fetchedAt: fetchedAt, source: source) {
             return snapshot
         }
@@ -286,6 +472,89 @@ enum ChatGPTClient {
             source: source,
             extraFooter: nil
         )
+    }
+
+    /// CodexBar-shaped `wham/usage`: `rate_limit.primary_window` (Session) and
+    /// `secondary_window` (Weekly). Requires `used_percent` — never invents a bar
+    /// from `credits` alone.
+    private static func parseWhamUsage(
+        _ raw: [String: Any],
+        email: String?,
+        fallbackPlan: String?,
+        fetchedAt: Date,
+        source: SnapshotSource
+    ) -> UsageSnapshot? {
+        let rateLimit: [String: Any]
+        if let nested = raw["rate_limit"] as? [String: Any] {
+            rateLimit = nested
+        } else if raw["primary_window"] != nil || raw["secondary_window"] != nil {
+            rateLimit = raw
+        } else {
+            return nil
+        }
+
+        let primaryObject = rateLimit["primary_window"] as? [String: Any]
+            ?? rateLimit["primaryWindow"] as? [String: Any]
+        let secondaryObject = rateLimit["secondary_window"] as? [String: Any]
+            ?? rateLimit["secondaryWindow"] as? [String: Any]
+        let primary = windowFromRateLimit(primaryObject, fallbackTitle: "Session")
+        let secondary = windowFromRateLimit(secondaryObject, fallbackTitle: "Weekly")
+        guard primary != nil || secondary != nil else { return nil }
+
+        let plan = JSONWalk.string(raw, keys: ["plan_type", "planType", "plan"])
+            .map(humanPlanName)
+            ?? fallbackPlan
+
+        var snapshot = UsageSnapshot(
+            provider: .chatgpt,
+            planName: plan,
+            fetchedAt: fetchedAt,
+            session: primary,
+            weekly: secondary,
+            source: source,
+            extraFooter: creditsFooter(from: raw)
+        )
+        snapshot.accountEmail = email
+        return snapshot
+    }
+
+    private static func windowFromRateLimit(_ object: [String: Any]?, fallbackTitle: String) -> UsageWindow? {
+        guard let object else { return nil }
+        guard let used = JSONNumber.double(from: object["used_percent"] ?? object["usedPercent"]) else {
+            return nil
+        }
+        let remaining = Percent.remaining(used: used)
+        let reset = TimeFormatting.parseDate(object["reset_at"] ?? object["resetAt"])
+        return UsageWindow(
+            title: fallbackTitle,
+            remainingPercent: remaining,
+            usedPercent: Percent.clamp(used),
+            resetAt: reset
+        )
+    }
+
+    private static func titleForWindowSeconds(_ seconds: Double, fallback: String) -> String {
+        if seconds > 0 && seconds <= 12 * 3600 { return "Session" }
+        if seconds >= 3 * 86_400 { return "Weekly" }
+        return fallback
+    }
+
+    /// Footer only — never a percent bar.
+    private static func creditsFooter(from object: [String: Any]) -> String? {
+        guard let credits = object["credits"] as? [String: Any] else { return nil }
+        if let unlimited = credits["unlimited"] as? Bool, unlimited {
+            return "Credits unlimited"
+        }
+        if let flag = JSONNumber.double(from: credits["unlimited"]), flag != 0 {
+            return "Credits unlimited"
+        }
+        if let balance = JSONNumber.double(from: credits["balance"]) {
+            if abs(balance - balance.rounded()) < 0.05 {
+                return "Credits \(Int(balance.rounded()))"
+            }
+            return "Credits \(balance)"
+        }
+        return nil
     }
 
     private static func parseCanonical(
@@ -402,8 +671,7 @@ enum ChatGPTClient {
             return "Session"
         }
         if let seconds = windowSeconds {
-            if seconds <= 12 * 3600 { return "Session" }
-            if seconds >= 3 * 86_400 { return "Weekly" }
+            return titleForWindowSeconds(seconds, fallback: key.flatMap { $0.isEmpty ? nil : TitleCase.words($0) } ?? "Usage")
         }
         return key.flatMap { $0.isEmpty ? nil : TitleCase.words($0) } ?? "Usage"
     }
@@ -445,5 +713,92 @@ enum ChatGPTClient {
             resetAt: candidate.resetAt,
             extra: candidate.extra
         )
+    }
+
+    // MARK: - Identity helpers
+
+    private static func accountId(fromSession object: [String: Any], accessToken: String) -> String? {
+        if let account = object["account"] as? [String: Any],
+           let id = JSONWalk.string(account, keys: ["id", "account_id", "accountId", "chatgpt_account_id"]) {
+            return id
+        }
+        if let id = JSONWalk.string(object, keys: ["account_id", "accountId", "chatgpt_account_id"]) {
+            return id
+        }
+        if let user = object["user"] as? [String: Any],
+           let id = JSONWalk.string(user, keys: ["account_id", "accountId", "chatgpt_account_id"]) {
+            return id
+        }
+        if let payload = JWT.payload(accessToken) {
+            return accountId(fromJWT: payload)
+        }
+        return nil
+    }
+
+    private static func accountId(fromJWT payload: [String: Any]) -> String? {
+        if let id = JSONWalk.string(payload, keys: ["chatgpt_account_id", "account_id", "chatgptAccountId"]) {
+            return id
+        }
+        if let auth = payload["https://api.openai.com/auth"] as? [String: Any] {
+            return JSONWalk.string(auth, keys: ["chatgpt_account_id", "account_id"])
+        }
+        return nil
+    }
+
+    private static func nonEmpty(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+        return value
+    }
+
+    /// Read-only Codex CLI OAuth file. Codex CLI owns refresh and writes;
+    /// QuotaBar never updates this file and never starts a Codex OAuth dance.
+    private enum CodexCLIAuth {
+        struct Tokens {
+            var accessToken: String
+            var accountId: String?
+            var email: String?
+            var planName: String?
+        }
+
+        static func fileURL() -> URL {
+            let env = ProcessInfo.processInfo.environment["CODEX_HOME"]?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !env.isEmpty {
+                let expanded = (env as NSString).expandingTildeInPath
+                return URL(fileURLWithPath: expanded, isDirectory: true)
+                    .appendingPathComponent("auth.json")
+            }
+            return FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".codex", isDirectory: true)
+                .appendingPathComponent("auth.json")
+        }
+
+        static func read() -> Tokens? {
+            let url = fileURL()
+            let path = url.path(percentEncoded: false)
+            guard FileManager.default.fileExists(atPath: path),
+                  let data = try? Data(contentsOf: url),
+                  let object = try? JSONWalk.object(from: data)
+            else { return nil }
+
+            let tokens = object["tokens"] as? [String: Any] ?? [:]
+            guard let access = ChatGPTClient.nonEmpty(tokens["access_token"] as? String) else { return nil }
+
+            var accountId = ChatGPTClient.nonEmpty(tokens["account_id"] as? String)
+            var email: String?
+            if let idToken = ChatGPTClient.nonEmpty(tokens["id_token"] as? String),
+               let payload = JWT.payload(idToken) {
+                email = JSONWalk.string(payload, keys: ["email", "email_address", "preferred_username"])
+                if accountId == nil {
+                    accountId = ChatGPTClient.accountId(fromJWT: payload)
+                }
+            }
+            if accountId == nil, let payload = JWT.payload(access) {
+                accountId = ChatGPTClient.accountId(fromJWT: payload)
+            }
+            return Tokens(accessToken: access, accountId: accountId, email: email, planName: nil)
+        }
     }
 }

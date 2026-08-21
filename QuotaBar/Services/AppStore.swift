@@ -262,6 +262,8 @@ final class AppStore: ObservableObject {
                 await refreshChatGPTAccount(id, userInitiated: true)
             } else if settings.previewFixtures {
                 await refreshChatGPTPreviewFallback(userInitiated: true)
+            } else {
+                await refreshImplicitChatGPT(userInitiated: true)
             }
             return
         }
@@ -306,6 +308,8 @@ final class AppStore: ObservableObject {
         if accounts.isEmpty {
             if settings.previewFixtures {
                 await refreshChatGPTPreviewFallback(userInitiated: userInitiated)
+            } else {
+                await refreshImplicitChatGPT(userInitiated: userInitiated)
             }
             return
         }
@@ -344,6 +348,27 @@ final class AppStore: ObservableObject {
         }
     }
 
+    /// Uses ~/.codex/auth.json when no ChatGPT account has been added yet.
+    /// Does not persist a new account on each launch.
+    private func refreshImplicitChatGPT(userInitiated: Bool) async {
+        let current = states[.chatgpt] ?? .idle
+        if userInitiated || shouldShowLoading(current) {
+            states[.chatgpt] = .loading
+        }
+        do {
+            let snapshot = try await ChatGPTClient.fetch(cookie: nil, pastedJSON: nil)
+            states[.chatgpt] = .ready(snapshot)
+        } catch let error as QuotaError {
+            if error.isAuthFailure {
+                states[.chatgpt] = .signedOut(error.errorDescription ?? ProviderKind.chatgpt.signInHint)
+            } else {
+                states[.chatgpt] = .failure(error.errorDescription ?? "Something went wrong.")
+            }
+        } catch {
+            states[.chatgpt] = .failure(error.localizedDescription)
+        }
+    }
+
     private func refreshChatGPTPreviewFallback(userInitiated: Bool) async {
         let current = states[.chatgpt] ?? .idle
         if userInitiated || shouldShowLoading(current) {
@@ -361,7 +386,13 @@ final class AppStore: ObservableObject {
             if settings.previewFixtures {
                 return states[.chatgpt] ?? .idle
             }
-            return .signedOut(ProviderKind.chatgpt.signInHint)
+            let implicit = states[.chatgpt] ?? .idle
+            switch implicit {
+            case .idle:
+                return .signedOut(ProviderKind.chatgpt.signInHint)
+            default:
+                return implicit
+            }
         }
         guard let id, settings.chatgptAccounts.contains(where: { $0.id == id }) else {
             return .signedOut(ProviderKind.chatgpt.signInHint)
@@ -401,7 +432,7 @@ final class AppStore: ObservableObject {
             return try await CursorClient.fetch(cookie: emptyToNil(cursorCookie))
         case .chatgpt:
             guard let id = settings.selectedChatGPTAccountId else {
-                throw QuotaError.notSignedIn(ProviderKind.chatgpt.signInHint)
+                return try await ChatGPTClient.fetch(cookie: nil, pastedJSON: nil)
             }
             return try await ChatGPTClient.fetch(
                 cookie: emptyToNil(chatgptCookies[id, default: ""]),
