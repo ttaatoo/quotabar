@@ -1,5 +1,39 @@
 import Foundation
 
+struct ChatGPTAccount: Equatable, Codable, Identifiable, Hashable {
+    var id: UUID
+    var label: String
+    var enabled: Bool
+    var email: String?
+
+    init(id: UUID = UUID(), label: String, enabled: Bool = true, email: String? = nil) {
+        self.id = id
+        self.label = label
+        self.enabled = enabled
+        self.email = email
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, label, enabled, email
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        label = try container.decode(String.self, forKey: .label)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        email = try container.decodeIfPresent(String.self, forKey: .email)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(label, forKey: .label)
+        try container.encode(enabled, forKey: .enabled)
+        try container.encodeIfPresent(email, forKey: .email)
+    }
+}
+
 struct AppSettings: Equatable, Codable {
     var enabledProviders: [ProviderKind]
     var selectedProvider: ProviderKind
@@ -8,6 +42,8 @@ struct AppSettings: Equatable, Codable {
     var glmRegion: GLMRegion
     var previewFixtures: Bool
     var launchAtLogin: Bool
+    var chatgptAccounts: [ChatGPTAccount]
+    var selectedChatGPTAccountId: UUID?
 
     static let `default` = AppSettings(
         enabledProviders: ProviderKind.allCases,
@@ -16,12 +52,19 @@ struct AppSettings: Equatable, Codable {
         displayMode: .remaining,
         glmRegion: .global,
         previewFixtures: false,
-        launchAtLogin: false
+        launchAtLogin: false,
+        chatgptAccounts: [],
+        selectedChatGPTAccountId: nil
     )
 
     var visibleProviders: [ProviderKind] {
         let enabled = enabledProviders
         return ProviderKind.allCases.filter { enabled.contains($0) }
+    }
+
+    var visibleChatGPTAccounts: [ChatGPTAccount] {
+        let enabled = chatgptAccounts.filter(\.enabled)
+        return enabled.isEmpty ? chatgptAccounts : enabled
     }
 
     mutating func sanitize() {
@@ -33,5 +76,29 @@ struct AppSettings: Equatable, Codable {
         if !enabledProviders.contains(selectedProvider) {
             selectedProvider = enabledProviders.first ?? .cursor
         }
+
+        var seen = Set<UUID>()
+        chatgptAccounts = chatgptAccounts.filter { account in
+            if seen.contains(account.id) { return false }
+            seen.insert(account.id)
+            return true
+        }
+        for index in chatgptAccounts.indices {
+            let trimmed = chatgptAccounts[index].label.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                chatgptAccounts[index].label = "ChatGPT"
+            } else {
+                chatgptAccounts[index].label = trimmed
+            }
+            if let email = chatgptAccounts[index].email?.trimmingCharacters(in: .whitespacesAndNewlines), email.isEmpty {
+                chatgptAccounts[index].email = nil
+            }
+        }
+
+        let selectable = visibleChatGPTAccounts
+        if let selected = selectedChatGPTAccountId, selectable.contains(where: { $0.id == selected }) {
+            return
+        }
+        selectedChatGPTAccountId = selectable.first?.id
     }
 }
