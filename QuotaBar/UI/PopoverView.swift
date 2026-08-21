@@ -106,7 +106,7 @@ struct PopoverView: View {
                     }
                 }
             }
-            .scrollBounceBehavior(.basedOnSize, axes: .vertical)
+            .scrollBounceBehavior(.basedOnSize)
         }
     }
 

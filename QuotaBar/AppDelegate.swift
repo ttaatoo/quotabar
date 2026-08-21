@@ -46,7 +46,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hosting.view.frame = NSRect(origin: .zero, size: Theme.popoverChromeSize)
         popover.contentViewController = hosting
         popover.contentSize = Theme.popoverChromeSize
-        didLockPopoverSize = true
         self.popover = popover
         paintPopoverChrome()
         popover.delegate = self

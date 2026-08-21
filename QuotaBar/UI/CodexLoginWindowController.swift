@@ -42,8 +42,8 @@ final class CodexLoginPresenter {
             controller = nil
         }
         switch result {
-        case .imported:
-            break
+        case .imported(let email):
+            presentImportedNotice(email: email)
         case .cancelled:
             break
         case .failed(let message):
