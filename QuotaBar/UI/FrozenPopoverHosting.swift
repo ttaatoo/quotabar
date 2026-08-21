@@ -30,7 +30,7 @@ final class FrozenPopoverController: NSViewController {
         hosting.view.autoresizingMask = []
         hosting.view.clipsToBounds = true
         chrome.addSubview(hosting.view)
-        hosting.didMove(toParent: self)
+        hosting.didMoveToParentViewController(self)
         lockChromeFrames()
     }
 
