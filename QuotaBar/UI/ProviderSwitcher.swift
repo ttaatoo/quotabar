@@ -23,7 +23,7 @@ struct ProviderSwitcher: View {
                 .buttonStyle(.plain)
             }
         }
-        .frame(height: 26)
+        .frame(height: Theme.providerSwitcherHeight)
     }
 }
 
@@ -32,12 +32,16 @@ struct ChatGPTAccountSwitcher: View {
     @Binding var selectedID: UUID
 
     var body: some View {
-        HStack(spacing: 4) {
-            ForEach(accounts) { account in
-                pill(account)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                ForEach(accounts) { account in
+                    pill(account)
+                }
             }
+            .frame(height: Theme.accountRowHeight)
         }
-        .frame(maxWidth: .infinity)
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: Theme.accountRowHeight)
     }
 
@@ -49,8 +53,9 @@ struct ChatGPTAccountSwitcher: View {
                 .font(.system(size: 10.5, weight: selectedID == account.id ? .semibold : .medium))
                 .foregroundStyle(selectedID == account.id ? Theme.primary : Theme.secondary)
                 .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                .frame(maxWidth: .infinity)
+                .truncationMode(.tail)
+                .padding(.horizontal, 8)
+                .frame(maxWidth: Theme.accountPillMaxWidth)
                 .frame(height: Theme.accountRowHeight)
                 .background(
                     Capsule(style: .continuous)

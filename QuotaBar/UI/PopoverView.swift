@@ -14,15 +14,15 @@ struct PopoverView: View {
     var onIntrinsicSizeChange: (CGSize) -> Void = { _ in }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.popoverStackSpacing) {
             header
             switcherBlock
             content
             footer
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 13)
-        .padding(.bottom, 11)
+        .padding(.horizontal, Theme.popoverHorizontalPadding)
+        .padding(.top, Theme.popoverPaddingTop)
+        .padding(.bottom, Theme.popoverPaddingBottom)
         .frame(width: Theme.popoverWidth)
         .background(
             GeometryReader { proxy in
@@ -62,27 +62,16 @@ struct PopoverView: View {
             Button {
                 Task { await store.refreshSelected() }
             } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Theme.secondary)
-                    .rotationEffect(.degrees(store.isRefreshing || isLoading ? 360 : 0))
-                    .animation(
-                        (store.isRefreshing || isLoading)
-                            ? .linear(duration: 0.85).repeatForever(autoreverses: false)
-                            : .default,
-                        value: store.isRefreshing || isLoading
-                    )
-                    .frame(width: 22, height: 22)
-                    .background(Circle().fill(Color.white.opacity(0.08)))
+                RefreshSpinner(spinning: store.isRefreshing || isLoading)
             }
             .buttonStyle(.plain)
             .help("Refresh")
         }
-        .frame(minHeight: 34, alignment: .top)
+        .frame(minHeight: Theme.headerMinHeight, alignment: .top)
     }
 
     private var switcherBlock: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: Theme.accountRowSpacing) {
             ProviderSwitcher(
                 providers: store.visibleProviders,
                 selected: Binding(
@@ -90,19 +79,30 @@ struct PopoverView: View {
                     set: { store.select($0) }
                 )
             )
-            if showsAccountSwitcher {
-                ChatGPTAccountSwitcher(
-                    accounts: store.visibleChatGPTAccounts,
-                    selectedID: Binding(
-                        get: {
-                            store.settings.selectedChatGPTAccountId
-                                ?? store.visibleChatGPTAccounts.first?.id
-                                ?? UUID()
-                        },
-                        set: { store.selectChatGPTAccount($0) }
-                    )
+            accountSlot
+        }
+        .frame(height: Theme.switcherBlockHeight, alignment: .top)
+    }
+
+    @ViewBuilder
+    private var accountSlot: some View {
+        if showsAccountSwitcher {
+            ChatGPTAccountSwitcher(
+                accounts: store.visibleChatGPTAccounts,
+                selectedID: Binding(
+                    get: {
+                        store.settings.selectedChatGPTAccountId
+                            ?? store.visibleChatGPTAccounts.first?.id
+                            ?? UUID()
+                    },
+                    set: { store.selectChatGPTAccount($0) }
                 )
-            }
+            )
+        } else {
+            Color.clear
+                .frame(maxWidth: .infinity)
+                .frame(height: Theme.accountRowHeight)
+                .accessibilityHidden(true)
         }
     }
 
@@ -126,7 +126,7 @@ struct PopoverView: View {
     }
 
     private var footer: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: Theme.footerStackSpacing) {
             statusRow
             Divider().overlay(Theme.hairline)
             HStack {
@@ -137,6 +137,7 @@ struct PopoverView: View {
             .buttonStyle(.plain)
             .font(.system(size: 12))
             .foregroundStyle(Theme.secondary)
+            .frame(height: Theme.footerButtonsHeight)
         }
     }
 
@@ -214,5 +215,29 @@ struct PopoverView: View {
         case .failure:
             return "Update failed"
         }
+    }
+}
+
+/// Time-driven spin so a user click still animates when the fetch is short
+/// or the selected provider never enters `.loading`.
+private struct RefreshSpinner: View {
+    let spinning: Bool
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !spinning)) { context in
+            Image(systemName: "arrow.clockwise")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.secondary)
+                .rotationEffect(.degrees(Self.angle(date: context.date, spinning: spinning)))
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(Color.white.opacity(0.08)))
+        }
+    }
+
+    private static func angle(date: Date, spinning: Bool) -> Double {
+        guard spinning else { return 0 }
+        let period = 0.85
+        let t = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: period)
+        return (t / period) * 360
     }
 }

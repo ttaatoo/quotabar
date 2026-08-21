@@ -13,10 +13,18 @@ struct EmptyStateView: View {
                 .foregroundStyle(Theme.primary)
                 .lineLimit(1)
             Spacer(minLength: 8)
-            Button(actionTitle, action: action)
-                .font(.system(size: 11.5, weight: .medium))
-                .foregroundStyle(Theme.primary)
-                .buttonStyle(.plain)
+            Button(action: action) {
+                Text(actionTitle)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.primary)
+                    .padding(.horizontal, 8)
+                    .frame(minHeight: 22)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Theme.badgeFill)
+                    )
+            }
+            .buttonStyle(.plain)
         }
         .help(message)
         .frame(maxWidth: .infinity, minHeight: Theme.statusRowHeight, maxHeight: Theme.statusRowHeight)

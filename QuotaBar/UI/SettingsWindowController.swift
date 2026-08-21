@@ -21,8 +21,9 @@ final class SettingsWindowController: NSWindowController {
         let hosting = NSHostingController(rootView: view)
         let window = NSWindow(contentViewController: hosting)
         window.title = "QuotaBar Settings"
-        window.styleMask = [.titled, .closable, .miniaturizable]
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.setContentSize(NSSize(width: 460, height: 700))
+        window.contentMinSize = NSSize(width: 420, height: 560)
         window.isReleasedWhenClosed = false
         window.level = .floating
         super.init(window: window)
