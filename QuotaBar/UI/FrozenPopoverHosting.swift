@@ -23,14 +23,15 @@ final class FrozenPopoverController: NSViewController {
     }
 
     override func loadView() {
+        // Host the SwiftUI tree as a subview only. Do not use parent/child
+        // view-controller containment: AppKit NSHostingController does not
+        // expose UIKit's didMove(toParent:) / didMoveToParentViewController.
         let chrome = FrozenPopoverChromeView()
         view = chrome
-        addChild(hosting)
         hosting.view.frame = NSRect(origin: .zero, size: Theme.popoverChromeSize)
-        hosting.view.autoresizingMask = []
         hosting.view.clipsToBounds = true
+        hosting.view.autoresizingMask = []
         chrome.addSubview(hosting.view)
-        hosting.didMoveToParentViewController(self)
         lockChromeFrames()
     }
 
