@@ -58,7 +58,7 @@ struct SettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("The Keychain cookie and JSON for this account are removed. Other accounts are left alone.")
+            Text("The Keychain cookie and JSON for this account are removed. A private Codex home is deleted when it belongs to QuotaBar; ~/.codex/auth.json is never deleted.")
         }
     }
 
@@ -105,9 +105,13 @@ struct SettingsView: View {
             tint: Theme.settingsTint(for: .cursor),
             hint: "Leave empty to use the local Cursor.app token."
         ) {
-            SecureField("Cookie (optional)", text: $store.cursorCookie)
-                .textContentType(.password)
-                .frame(minHeight: Theme.settingsHitTarget)
+            if let email = store.cursorEmail, !email.isEmpty {
+                Text(email)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+            SettingsSecretField(placeholder: "Cookie (optional)", text: $store.cursorCookie)
             Text("Or paste a WorkosCursorSessionToken / full Cookie header.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
@@ -119,10 +123,10 @@ struct SettingsView: View {
             title: "ChatGPT",
             symbol: ProviderKind.chatgpt.settingsSymbol,
             tint: Theme.settingsTint(for: .chatgpt),
-            hint: "QuotaBar reads ~/.codex/auth.json from `codex login`. Add account is a cookie fallback for the same usage API."
+            hint: "Add account runs `codex login` in your default browser. Extra accounts use a private Codex home so ~/.codex/auth.json is not overwritten."
         ) {
             Button {
-                ChatGPTLoginPresenter.shared.begin(store: store)
+                CodexLoginPresenter.shared.begin(store: store)
             } label: {
                 Label("Add account", systemImage: "plus")
                     .frame(maxWidth: .infinity)
@@ -158,9 +162,7 @@ struct SettingsView: View {
             tint: Theme.settingsTint(for: .glm),
             hint: "Stored in the Keychain. Also accepted from ~/.config/quotabar/config.json or Z_AI_API_KEY."
         ) {
-            SecureField("API key", text: $store.glmAPIKey)
-                .textContentType(.password)
-                .frame(minHeight: Theme.settingsHitTarget)
+            SettingsSecretField(placeholder: "API key", text: $store.glmAPIKey)
             Picker("Region", selection: $store.settings.glmRegion) {
                 ForEach(GLMRegion.allCases) { region in
                     Text(region.title).tag(region)
@@ -235,13 +237,13 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(account.label)
+                    Text(account.displayTitle)
                         .font(.system(size: 13, weight: .medium))
                         .lineLimit(1)
                     if let email = account.email,
                        !email.isEmpty,
-                       email.caseInsensitiveCompare(account.label) != .orderedSame {
-                        Text(email)
+                       account.label.caseInsensitiveCompare(email) != .orderedSame {
+                        Text(account.label)
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -259,9 +261,7 @@ struct SettingsView: View {
 
             DisclosureGroup("Advanced — cookie / JSON") {
                 VStack(alignment: .leading, spacing: 8) {
-                    SecureField("Session cookie", text: cookieBinding(account.id))
-                        .textContentType(.password)
-                        .frame(minHeight: Theme.settingsHitTarget)
+                    SettingsSecretField(placeholder: "Session cookie", text: cookieBinding(account.id))
                     Text("Optional pasted wham/usage JSON when the live API has no percentages.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
@@ -386,6 +386,50 @@ struct SettingsView: View {
         Binding(
             get: { store.settings.launchAtLogin },
             set: { store.setLaunchAtLogin($0) }
+        )
+    }
+}
+
+private struct SettingsSecretField: View {
+    let placeholder: String
+    @Binding var text: String
+    @State private var revealed = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Group {
+                if revealed {
+                    TextField(placeholder, text: $text)
+                } else {
+                    SecureField(placeholder, text: $text)
+                }
+            }
+            .textFieldStyle(.plain)
+            .font(.system(size: 12.5))
+            .textContentType(.password)
+            .focusEffectDisabled()
+
+            Button {
+                revealed.toggle()
+            } label: {
+                Image(systemName: revealed ? "eye.slash" : "eye")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(revealed ? "Hide" : "Show")
+        }
+        .padding(.horizontal, 10)
+        .frame(minHeight: Theme.settingsFieldHeight, maxHeight: Theme.settingsFieldHeight)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Theme.settingsFieldFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Theme.settingsHairline, lineWidth: 1)
         )
     }
 }

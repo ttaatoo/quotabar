@@ -14,10 +14,11 @@ enum CursorClient {
         try HTTPClient.requireOK(response, data: data, host: "cursor.com")
 
         let object = try JSONWalk.object(from: data)
-        return try parse(object, fetchedAt: now)
+        let email = await resolveEmail(cookie: cookie, usageObject: object)
+        return try parse(object, fetchedAt: now, email: email)
     }
 
-    static func parse(_ raw: [String: Any], fetchedAt: Date = Date()) throws -> UsageSnapshot {
+    static func parse(_ raw: [String: Any], fetchedAt: Date = Date(), email: String? = nil) throws -> UsageSnapshot {
         if raw["error"] as? String == "not_authenticated" {
             throw QuotaError.unauthorized("Cursor says this session is not authenticated.")
         }
@@ -33,8 +34,7 @@ enum CursorClient {
         }
 
         if unlimited {
-            return UsageSnapshot(
-                provider: .cursor,
+            return snapshot(
                 planName: planName,
                 fetchedAt: fetchedAt,
                 session: UsageWindow(
@@ -51,20 +51,19 @@ enum CursorClient {
                     resetAt: cycleEnd,
                     unlimited: true
                 ),
-                source: .live,
-                extraFooter: extra
+                extraFooter: extra,
+                email: email
             )
         }
 
         if let plan = individualPlan(raw) {
-            return UsageSnapshot(
-                provider: .cursor,
+            return snapshot(
                 planName: planName,
                 fetchedAt: fetchedAt,
                 session: cursorModelsWindow(usedPercent: plan.autoPercentUsed, resetAt: cycleEnd),
                 weekly: otherModelsWindow(usedPercent: plan.apiPercentUsed, resetAt: cycleEnd),
-                source: .live,
-                extraFooter: extra
+                extraFooter: extra,
+                email: email
             )
         }
 
@@ -81,18 +80,76 @@ enum CursorClient {
             namedUsed = nil
         }
         if autoUsed != nil || namedUsed != nil {
-            return UsageSnapshot(
-                provider: .cursor,
+            return snapshot(
                 planName: "\(planName) team",
                 fetchedAt: fetchedAt,
                 session: cursorModelsWindow(usedPercent: autoUsed, resetAt: cycleEnd),
                 weekly: otherModelsWindow(usedPercent: namedUsed, resetAt: cycleEnd),
-                source: .live,
-                extraFooter: extra
+                extraFooter: extra,
+                email: email
             )
         }
 
         throw QuotaError.schema("Cursor usage-summary did not include plan percentages.")
+    }
+
+    private static func snapshot(
+        planName: String,
+        fetchedAt: Date,
+        session: UsageWindow?,
+        weekly: UsageWindow?,
+        extraFooter: String?,
+        email: String?
+    ) -> UsageSnapshot {
+        var value = UsageSnapshot(
+            provider: .cursor,
+            planName: planName,
+            fetchedAt: fetchedAt,
+            session: session,
+            weekly: weekly,
+            source: .live,
+            extraFooter: extraFooter
+        )
+        value.accountEmail = email
+        return value
+    }
+
+    /// Prefer a real email from usage-summary, then `/api/auth/me`, then the session JWT.
+    /// Never invent an address when those sources omit one.
+    private static func resolveEmail(cookie: String, usageObject: [String: Any]) async -> String? {
+        if let email = emailField(in: usageObject) {
+            return email
+        }
+        if let email = await fetchAuthMeEmail(cookie: cookie) {
+            return email
+        }
+        return CursorAuth.emailFromSessionCookie(cookie)
+    }
+
+    private static func emailField(in object: [String: Any]) -> String? {
+        if let email = CodexCLIAuth.email(from: object) {
+            return email
+        }
+        return nil
+    }
+
+    private static func fetchAuthMeEmail(cookie: String) async -> String? {
+        guard let url = URL(string: "https://cursor.com/api/auth/me") else { return nil }
+        do {
+            let (data, response) = try await HTTPClient.get(
+                url: url,
+                headers: [
+                    "Cookie": cookie,
+                    "Origin": "https://cursor.com",
+                    "Referer": "https://cursor.com/dashboard?tab=usage"
+                ]
+            )
+            guard (200...299).contains(response.statusCode) else { return nil }
+            let object = try JSONWalk.object(from: data)
+            return CodexCLIAuth.email(from: object)
+        } catch {
+            return nil
+        }
     }
 
     private static func cursorModelsWindow(usedPercent: Double?, resetAt: Date?) -> UsageWindow? {

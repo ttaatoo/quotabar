@@ -1,60 +1,51 @@
 import AppKit
 import SwiftUI
 
-struct PopoverSizeKey: PreferenceKey {
-    static var defaultValue: CGSize = .zero
-
-    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
-        value = nextValue()
-    }
-}
-
 struct PopoverView: View {
     @ObservedObject var store: AppStore
-    var onIntrinsicSizeChange: (CGSize) -> Void = { _ in }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.popoverStackSpacing) {
             header
-            switcherBlock
+            ProviderSwitcher(
+                providers: store.visibleProviders,
+                selected: Binding(
+                    get: { store.selected },
+                    set: { store.select($0) }
+                )
+            )
             content
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             footer
         }
         .padding(.horizontal, Theme.popoverHorizontalPadding)
         .padding(.top, Theme.popoverPaddingTop)
         .padding(.bottom, Theme.popoverPaddingBottom)
-        .frame(width: Theme.popoverWidth)
-        .background(
-            GeometryReader { proxy in
-                Color.clear.preference(key: PopoverSizeKey.self, value: proxy.size)
-            }
-        )
-        .onPreferenceChange(PopoverSizeKey.self, perform: onIntrinsicSizeChange)
-        .fixedSize(horizontal: true, vertical: true)
+        .frame(width: Theme.popoverWidth, height: Theme.popoverHeight, alignment: .top)
         .background(Theme.background)
         .preferredColorScheme(.dark)
     }
 
     private var header: some View {
         HStack(alignment: .top, spacing: 8) {
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(store.selected.title)
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(Theme.primary)
                     if let badge = badgeText {
                         Text(badge)
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(Theme.secondary)
                             .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
+                            .padding(.vertical, 1)
                             .background(
                                 Capsule(style: .continuous).fill(Theme.badgeFill)
                             )
                     }
                 }
                 Text(subtitle)
-                    .font(.system(size: 11))
+                    .font(.system(size: 10.5))
                     .foregroundStyle(Theme.secondary)
                     .lineLimit(1)
             }
@@ -70,80 +61,57 @@ struct PopoverView: View {
         .frame(minHeight: Theme.headerMinHeight, alignment: .top)
     }
 
-    private var switcherBlock: some View {
-        VStack(spacing: Theme.accountRowSpacing) {
-            ProviderSwitcher(
-                providers: store.visibleProviders,
-                selected: Binding(
-                    get: { store.selected },
-                    set: { store.select($0) }
-                )
-            )
-            accountSlot
-        }
-        .frame(height: Theme.switcherBlockHeight, alignment: .top)
-    }
-
     @ViewBuilder
-    private var accountSlot: some View {
-        if showsAccountSwitcher {
-            ChatGPTAccountSwitcher(
-                accounts: store.visibleChatGPTAccounts,
-                selectedID: Binding(
-                    get: {
-                        store.settings.selectedChatGPTAccountId
-                            ?? store.visibleChatGPTAccounts.first?.id
-                            ?? UUID()
-                    },
-                    set: { store.selectChatGPTAccount($0) }
-                )
-            )
+    private var content: some View {
+        if store.selected == .chatgpt {
+            chatgptContent
         } else {
-            Color.clear
-                .frame(maxWidth: .infinity)
-                .frame(height: Theme.accountRowHeight)
-                .accessibilityHidden(true)
+            providerMeters
         }
     }
 
-    private var content: some View {
+    private var providerMeters: some View {
         let snapshot = store.selectedState.snapshot
         return VStack(spacing: Theme.meterSpacing) {
-            UsageMeterRow(
-                title: snapshot?.session?.title ?? store.selected.primaryWindowTitle,
-                window: snapshot?.session,
-                mode: store.settings.displayMode,
-                now: store.now
-            )
-            UsageMeterRow(
-                title: snapshot?.weekly?.title ?? store.selected.secondaryWindowTitle,
-                window: snapshot?.weekly,
-                mode: store.settings.displayMode,
-                now: store.now
-            )
+            if let session = snapshot?.session {
+                UsageMeterRow(window: session, mode: store.settings.displayMode, now: store.now, compact: true)
+            }
+            if let weekly = snapshot?.weekly {
+                UsageMeterRow(window: weekly, mode: store.settings.displayMode, now: store.now, compact: true)
+            }
+            if snapshot?.session == nil && snapshot?.weekly == nil {
+                contentStatus
+            }
         }
-        .frame(height: Theme.meterStackHeight, alignment: .top)
-        .clipped()
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    private var footer: some View {
-        VStack(spacing: Theme.footerStackSpacing) {
-            statusRow
-            Divider().overlay(Theme.hairline)
-            HStack {
-                Button("Settings…") { store.openSettings() }
-                Spacer()
-                Button("Quit QuotaBar") { NSApp.terminate(nil) }
+    @ViewBuilder
+    private var chatgptContent: some View {
+        let rows = store.chatgptDisplayRows
+        if rows.isEmpty {
+            contentStatus
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        } else {
+            ScrollView(.vertical, showsIndicators: rows.count > 2) {
+                VStack(spacing: 6) {
+                    ForEach(rows) { row in
+                        ChatGPTAccountCard(
+                            row: row,
+                            mode: store.settings.displayMode,
+                            now: store.now,
+                            onRetry: { Task { await store.refreshSelected() } },
+                            onOpenSettings: store.openSettings
+                        )
+                    }
+                }
             }
-            .buttonStyle(.plain)
-            .font(.system(size: 12))
-            .foregroundStyle(Theme.secondary)
-            .frame(height: Theme.footerButtonsHeight)
+            .scrollBounceBehavior(.basedOnSize)
         }
     }
 
     @ViewBuilder
-    private var statusRow: some View {
+    private var contentStatus: some View {
         switch store.selectedState {
         case .signedOut(let message):
             EmptyStateView(
@@ -166,36 +134,60 @@ struct PopoverView: View {
                 actionTitle: "Open Settings",
                 action: store.openSettings
             )
-        case .ready(let snapshot):
-            extraFooterRow(snapshot.extraFooter)
-        case .idle, .loading:
-            extraFooterRow(nil)
+        default:
+            EmptyView()
         }
     }
 
-    private func extraFooterRow(_ text: String?) -> some View {
-        HStack {
-            Spacer()
-            Text(text ?? " ")
-                .font(.system(size: 10.5))
-                .foregroundStyle(Theme.tertiary)
-                .lineLimit(1)
-                .opacity((text == nil || text?.isEmpty == true) ? 0 : 1)
+    private var footer: some View {
+        VStack(spacing: Theme.footerStackSpacing) {
+            if let footerText = extraFooterText {
+                HStack {
+                    Spacer()
+                    Text(footerText)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.tertiary)
+                        .lineLimit(1)
+                }
+                .frame(height: Theme.statusRowHeight)
+            }
+            Divider().overlay(Theme.hairline)
+            HStack {
+                Button("Settings…") { store.openSettings() }
+                Spacer()
+                Button("Quit QuotaBar") { NSApp.terminate(nil) }
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 11.5))
+            .foregroundStyle(Theme.secondary)
+            .frame(height: Theme.footerButtonsHeight)
         }
-        .frame(maxWidth: .infinity, minHeight: Theme.statusRowHeight, maxHeight: Theme.statusRowHeight)
     }
 
-    private var showsAccountSwitcher: Bool {
-        store.selected == .chatgpt && store.visibleChatGPTAccounts.count >= 2
+    private var extraFooterText: String? {
+        if store.selected == .chatgpt { return nil }
+        if case .ready(let snapshot) = store.selectedState {
+            let text = snapshot.extraFooter?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return text.isEmpty ? nil : text
+        }
+        return nil
     }
 
     private var isLoading: Bool {
+        if store.isRefreshing { return true }
+        if store.selected == .chatgpt {
+            return store.chatgptDisplayRows.contains { row in
+                if case .loading = row.state { return true }
+                return false
+            }
+        }
         if case .loading = store.selectedState { return true }
         return false
     }
 
     private var badgeText: String? {
         if store.settings.previewFixtures { return "Preview" }
+        if store.selected == .chatgpt { return nil }
         if case .ready(let snapshot) = store.selectedState {
             return snapshot.planName
         }
@@ -203,12 +195,17 @@ struct PopoverView: View {
     }
 
     private var subtitle: String {
+        if store.selected == .chatgpt {
+            return chatgptSubtitle
+        }
         switch store.selectedState {
         case .ready(let snapshot):
-            var text = TimeFormatting.relativeUpdated(from: snapshot.fetchedAt, now: store.now)
-            if snapshot.source == .fixture { text += " · Preview" }
-            if snapshot.source == .pastedJSON { text += " · Pasted JSON" }
-            return text
+            var parts: [String] = []
+            if let email = snapshot.accountEmail, !email.isEmpty {
+                parts.append(email)
+            }
+            parts.append(updatedText(from: snapshot))
+            return parts.joined(separator: " · ")
         case .loading, .idle:
             return "Updating…"
         case .signedOut:
@@ -216,6 +213,132 @@ struct PopoverView: View {
         case .failure:
             return "Update failed"
         }
+    }
+
+    private var chatgptSubtitle: String {
+        let rows = store.chatgptDisplayRows
+        if rows.isEmpty {
+            if case .signedOut = store.selectedState { return "Not signed in" }
+            return "No accounts"
+        }
+        let ready = rows.compactMap { row -> UsageSnapshot? in
+            if case .ready(let snapshot) = row.state { return snapshot }
+            return nil
+        }
+        if let newest = ready.max(by: { $0.fetchedAt < $1.fetchedAt }) {
+            let count = rows.count
+            let prefix = count == 1 ? "1 account" : "\(count) accounts"
+            return "\(prefix) · \(updatedText(from: newest))"
+        }
+        if rows.contains(where: { if case .loading = $0.state { return true }; return false }) {
+            return "Updating…"
+        }
+        if rows.allSatisfy({ $0.state.isSignedOut }) {
+            return "Not signed in"
+        }
+        return "Update failed"
+    }
+
+    private func updatedText(from snapshot: UsageSnapshot) -> String {
+        var text = TimeFormatting.relativeUpdated(from: snapshot.fetchedAt, now: store.now)
+        if snapshot.source == .fixture { text += " · Preview" }
+        if snapshot.source == .pastedJSON { text += " · Pasted JSON" }
+        return text
+    }
+}
+
+private struct ChatGPTAccountCard: View {
+    let row: ChatGPTDisplayRow
+    let mode: DisplayMode
+    let now: Date
+    let onRetry: () -> Void
+    let onOpenSettings: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(title)
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(Theme.primary)
+                    .lineLimit(1)
+                Spacer(minLength: 6)
+                if let plan = planName {
+                    Text(plan)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Theme.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Capsule(style: .continuous).fill(Theme.badgeFill))
+                }
+            }
+
+            switch row.state {
+            case .ready(let snapshot):
+                let windows = [snapshot.weekly, snapshot.session].compactMap { $0 }
+                if windows.isEmpty {
+                    Text("No usage windows")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Theme.secondary)
+                } else {
+                    VStack(spacing: 5) {
+                        ForEach(windows, id: \.title) { window in
+                            UsageMeterRow(window: window, mode: mode, now: now, compact: true)
+                        }
+                    }
+                }
+                if let extra = snapshot.extraFooter, !extra.isEmpty {
+                    Text(extra)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+            case .loading, .idle:
+                Text("Updating…")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Theme.secondary)
+            case .signedOut(let message):
+                EmptyStateView(
+                    title: "Sign in",
+                    message: message,
+                    actionTitle: "Settings",
+                    action: onOpenSettings
+                )
+            case .failure(let message):
+                EmptyStateView(
+                    title: "Couldn’t load",
+                    message: message,
+                    actionTitle: "Retry",
+                    action: onRetry
+                )
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Theme.elevated)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Theme.hairline, lineWidth: 1)
+        )
+    }
+
+    private var title: String {
+        if let email = row.account?.email, !email.isEmpty {
+            return email
+        }
+        if case .ready(let snapshot) = row.state, let email = snapshot.accountEmail, !email.isEmpty {
+            return email
+        }
+        return row.account?.label ?? "ChatGPT"
+    }
+
+    private var planName: String? {
+        if case .ready(let snapshot) = row.state {
+            return snapshot.planName
+        }
+        return nil
     }
 }
 
@@ -230,7 +353,7 @@ private struct RefreshSpinner: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Theme.secondary)
                 .rotationEffect(.degrees(Self.angle(date: context.date, spinning: spinning)))
-                .frame(width: 22, height: 22)
+                .frame(width: 20, height: 20)
                 .background(Circle().fill(Color.white.opacity(0.08)))
         }
     }

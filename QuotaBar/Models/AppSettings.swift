@@ -5,16 +5,28 @@ struct ChatGPTAccount: Equatable, Codable, Identifiable, Hashable {
     var label: String
     var enabled: Bool
     var email: String?
+    /// Private or ambient Codex home whose `auth.json` this account reads. Never written by QuotaBar.
+    var codexHomePath: String?
+    var usesAmbientCodexHome: Bool
 
-    init(id: UUID = UUID(), label: String, enabled: Bool = true, email: String? = nil) {
+    init(
+        id: UUID = UUID(),
+        label: String,
+        enabled: Bool = true,
+        email: String? = nil,
+        codexHomePath: String? = nil,
+        usesAmbientCodexHome: Bool = false
+    ) {
         self.id = id
         self.label = label
         self.enabled = enabled
         self.email = email
+        self.codexHomePath = codexHomePath
+        self.usesAmbientCodexHome = usesAmbientCodexHome
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, label, enabled, email
+        case id, label, enabled, email, codexHomePath, usesAmbientCodexHome
     }
 
     init(from decoder: Decoder) throws {
@@ -23,6 +35,8 @@ struct ChatGPTAccount: Equatable, Codable, Identifiable, Hashable {
         label = try container.decode(String.self, forKey: .label)
         enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         email = try container.decodeIfPresent(String.self, forKey: .email)
+        codexHomePath = try container.decodeIfPresent(String.self, forKey: .codexHomePath)
+        usesAmbientCodexHome = try container.decodeIfPresent(Bool.self, forKey: .usesAmbientCodexHome) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -31,6 +45,15 @@ struct ChatGPTAccount: Equatable, Codable, Identifiable, Hashable {
         try container.encode(label, forKey: .label)
         try container.encode(enabled, forKey: .enabled)
         try container.encodeIfPresent(email, forKey: .email)
+        try container.encodeIfPresent(codexHomePath, forKey: .codexHomePath)
+        try container.encode(usesAmbientCodexHome, forKey: .usesAmbientCodexHome)
+    }
+
+    var displayTitle: String {
+        if let email, !email.isEmpty {
+            return email
+        }
+        return label
     }
 }
 
@@ -92,6 +115,9 @@ struct AppSettings: Equatable, Codable {
             }
             if let email = chatgptAccounts[index].email?.trimmingCharacters(in: .whitespacesAndNewlines), email.isEmpty {
                 chatgptAccounts[index].email = nil
+            }
+            if let home = chatgptAccounts[index].codexHomePath?.trimmingCharacters(in: .whitespacesAndNewlines) {
+                chatgptAccounts[index].codexHomePath = home.isEmpty ? nil : home
             }
         }
 
