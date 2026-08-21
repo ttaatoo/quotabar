@@ -74,7 +74,11 @@ struct PopoverView: View {
                         mode: store.settings.displayMode,
                         now: store.now,
                         onRetry: { Task { await store.refreshSelected() } },
-                        onOpenSettings: store.openSettings
+                        onOpenSettings: store.openSettings,
+                        isActive: store.selected == .chatgpt && store.isActiveChatGPTCard(row.id),
+                        onActivate: store.selected == .chatgpt
+                            ? { store.activateChatGPTCard(row.id) }
+                            : nil
                     )
                 }
             }
@@ -159,62 +163,42 @@ struct AccountCard: View {
     let now: Date
     let onRetry: () -> Void
     let onOpenSettings: () -> Void
+    var isActive: Bool = false
+    var onActivate: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.accountCardSpacing) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(title)
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(Theme.primary)
-                    .lineLimit(1)
-                Spacer(minLength: 6)
-                if let plan = planName {
-                    Text(plan)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(Theme.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                        .background(Capsule(style: .continuous).fill(Theme.badgeFill))
-                }
-            }
+            headerRow
+                .contentShape(Rectangle())
+                .onTapGesture { onActivate?() }
 
             switch row.state {
             case .ready(let snapshot):
-                let windows = [snapshot.session, snapshot.weekly].compactMap { $0 }
-                VStack(alignment: .leading, spacing: Theme.meterSpacing) {
-                    if windows.isEmpty {
-                        Text("No usage windows")
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(Theme.secondary)
-                    } else {
-                        ForEach(windows, id: \.title) { window in
-                            UsageMeterRow(window: window, mode: mode, now: now, compact: true)
-                        }
-                    }
-                    if let extra = snapshot.extraFooter, !extra.isEmpty {
-                        Text(extra)
-                            .font(.system(size: 10))
-                            .foregroundStyle(Theme.tertiary)
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                    }
-                }
+                readyBody(snapshot)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onActivate?() }
             case .loading, .idle:
                 Text("Updating…")
                     .font(.system(size: 10.5))
                     .foregroundStyle(Theme.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onActivate?() }
             case .signedOut(let message):
                 EmptyStateView(
                     title: "Sign in",
                     message: message,
                     actionTitle: "Settings",
-                    action: onOpenSettings
+                    action: onOpenSettings,
+                    onSelect: onActivate
                 )
             case .failure(let message):
                 EmptyStateView(
                     title: "Couldn’t load",
                     message: message,
                     actionTitle: "Retry",
-                    action: onRetry
+                    action: onRetry,
+                    onSelect: onActivate
                 )
             }
         }
@@ -224,11 +208,68 @@ struct AccountCard: View {
         .background(
             RoundedRectangle(cornerRadius: Theme.accountCardRadius, style: .continuous)
                 .fill(Theme.elevated)
+                .contentShape(
+                    RoundedRectangle(cornerRadius: Theme.accountCardRadius, style: .continuous)
+                )
+                .onTapGesture {
+                    onActivate?()
+                }
         )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.accountCardRadius, style: .continuous)
-                .strokeBorder(Theme.hairline, lineWidth: 1)
+                .strokeBorder(
+                    isActive ? Theme.logoPurple.opacity(0.72) : Theme.hairline,
+                    lineWidth: 1
+                )
         )
+        .accessibilityAddTraits(isActive ? [.isSelected] : [])
+        .accessibilityHint(onActivate == nil ? "" : "Show this account in the menu bar")
+    }
+
+    private var headerRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(title)
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(Theme.primary)
+                .lineLimit(1)
+            Spacer(minLength: 6)
+            if let plan = planName {
+                Text(plan)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Theme.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(Capsule(style: .continuous).fill(Theme.badgeFill))
+            }
+            if isActive {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(Theme.logoPurple)
+                    .frame(width: 8, height: 11)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
+    private func readyBody(_ snapshot: UsageSnapshot) -> some View {
+        let windows = [snapshot.session, snapshot.weekly].compactMap { $0 }
+        return VStack(alignment: .leading, spacing: Theme.meterSpacing) {
+            if windows.isEmpty {
+                Text("No usage windows")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Theme.secondary)
+            } else {
+                ForEach(windows, id: \.title) { window in
+                    UsageMeterRow(window: window, mode: mode, now: now, compact: true)
+                }
+            }
+            if let extra = snapshot.extraFooter, !extra.isEmpty {
+                Text(extra)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
     }
 
     private var title: String {

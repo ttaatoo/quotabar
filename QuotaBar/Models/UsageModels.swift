@@ -67,6 +67,20 @@ struct UsageSnapshot: Equatable {
         guard let remaining = mostConstrainedRemaining else { return false }
         return remaining < 25
     }
+
+    /// ChatGPT menu bar: the Weekly (or longer) meter the account card already
+    /// shows. Session-only accounts fall back to `mostConstrainedRemaining`.
+    var chatGPTMenuRemaining: Double? {
+        if let weekly, !weekly.unlimited {
+            return weekly.remainingPercent
+        }
+        return mostConstrainedRemaining
+    }
+
+    var isChatGPTMenuLow: Bool {
+        guard let remaining = chatGPTMenuRemaining else { return false }
+        return remaining < 25
+    }
 }
 
 /// ChatGPT / `wham/usage` lanes by **duration**, not primary/secondary slot.
