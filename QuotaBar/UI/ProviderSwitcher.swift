@@ -23,6 +23,7 @@ struct ProviderSwitcher: View {
                 .buttonStyle(.plain)
             }
         }
+        .frame(height: 26)
     }
 }
 
@@ -31,21 +32,13 @@ struct ChatGPTAccountSwitcher: View {
     @Binding var selectedID: UUID
 
     var body: some View {
-        VStack(spacing: 4) {
-            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                HStack(spacing: 4) {
-                    ForEach(row) { account in
-                        pill(account)
-                    }
-                }
+        HStack(spacing: 4) {
+            ForEach(accounts) { account in
+                pill(account)
             }
         }
-    }
-
-    private var rows: [[ChatGPTAccount]] {
-        stride(from: 0, to: accounts.count, by: 3).map { start in
-            Array(accounts[start..<min(start + 3, accounts.count)])
-        }
+        .frame(maxWidth: .infinity)
+        .frame(height: Theme.accountRowHeight)
     }
 
     private func pill(_ account: ChatGPTAccount) -> some View {
@@ -58,7 +51,7 @@ struct ChatGPTAccountSwitcher: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 4)
+                .frame(height: Theme.accountRowHeight)
                 .background(
                     Capsule(style: .continuous)
                         .fill(selectedID == account.id ? Theme.switcherSelected : Theme.switcherIdle)

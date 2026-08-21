@@ -1,31 +1,22 @@
 import AppKit
 import SwiftUI
 
+struct PopoverSizeKey: PreferenceKey {
+    static var defaultValue: CGSize = .zero
+
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        value = nextValue()
+    }
+}
+
 struct PopoverView: View {
     @ObservedObject var store: AppStore
+    var onIntrinsicSizeChange: (CGSize) -> Void = { _ in }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
-            ProviderSwitcher(
-                providers: store.visibleProviders,
-                selected: Binding(
-                    get: { store.selected },
-                    set: { store.select($0) }
-                )
-            )
-            if store.selected == .chatgpt, store.visibleChatGPTAccounts.count >= 2 {
-                ChatGPTAccountSwitcher(
-                    accounts: store.visibleChatGPTAccounts,
-                    selectedID: Binding(
-                        get: {
-                            store.settings.selectedChatGPTAccountId
-                                ?? store.visibleChatGPTAccounts[0].id
-                        },
-                        set: { store.selectChatGPTAccount($0) }
-                    )
-                )
-            }
+            switcherBlock
             content
             footer
         }
@@ -33,6 +24,12 @@ struct PopoverView: View {
         .padding(.top, 13)
         .padding(.bottom, 11)
         .frame(width: Theme.popoverWidth)
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: PopoverSizeKey.self, value: proxy.size)
+            }
+        )
+        .onPreferenceChange(PopoverSizeKey.self, perform: onIntrinsicSizeChange)
         .fixedSize(horizontal: true, vertical: true)
         .background(Theme.background)
         .preferredColorScheme(.dark)
@@ -59,6 +56,7 @@ struct PopoverView: View {
                 Text(subtitle)
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.secondary)
+                    .lineLimit(1)
             }
             Spacer(minLength: 8)
             Button {
@@ -80,35 +78,71 @@ struct PopoverView: View {
             .buttonStyle(.plain)
             .help("Refresh")
         }
+        .frame(minHeight: 34, alignment: .top)
+    }
+
+    private var switcherBlock: some View {
+        VStack(spacing: 6) {
+            ProviderSwitcher(
+                providers: store.visibleProviders,
+                selected: Binding(
+                    get: { store.selected },
+                    set: { store.select($0) }
+                )
+            )
+            if showsAccountSwitcher {
+                ChatGPTAccountSwitcher(
+                    accounts: store.visibleChatGPTAccounts,
+                    selectedID: Binding(
+                        get: {
+                            store.settings.selectedChatGPTAccountId
+                                ?? store.visibleChatGPTAccounts.first?.id
+                                ?? UUID()
+                        },
+                        set: { store.selectChatGPTAccount($0) }
+                    )
+                )
+            }
+        }
+    }
+
+    private var content: some View {
+        VStack(spacing: Theme.meterSpacing) {
+            UsageMeterRow(
+                title: "Session",
+                window: store.selectedState.snapshot?.session,
+                mode: store.settings.displayMode,
+                now: store.now
+            )
+            UsageMeterRow(
+                title: "Weekly",
+                window: store.selectedState.snapshot?.weekly,
+                mode: store.settings.displayMode,
+                now: store.now
+            )
+        }
+        .frame(height: Theme.meterStackHeight, alignment: .top)
+        .clipped()
+    }
+
+    private var footer: some View {
+        VStack(spacing: 8) {
+            statusRow
+            Divider().overlay(Theme.hairline)
+            HStack {
+                Button("Settings…") { store.openSettings() }
+                Spacer()
+                Button("Quit QuotaBar") { NSApp.terminate(nil) }
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 12))
+            .foregroundStyle(Theme.secondary)
+        }
     }
 
     @ViewBuilder
-    private var content: some View {
+    private var statusRow: some View {
         switch store.selectedState {
-        case .idle, .loading:
-            VStack(spacing: 10) {
-                placeholderMeter(title: "Session")
-                placeholderMeter(title: "Weekly")
-            }
-            .redacted(reason: .placeholder)
-            .padding(.vertical, 2)
-        case .ready(let snapshot):
-            VStack(spacing: 14) {
-                if let session = snapshot.session {
-                    UsageMeterRow(window: session, mode: store.settings.displayMode, now: store.now)
-                }
-                if let weekly = snapshot.weekly {
-                    UsageMeterRow(window: weekly, mode: store.settings.displayMode, now: store.now)
-                }
-                if snapshot.session == nil && snapshot.weekly == nil {
-                    EmptyStateView(
-                        title: "No usage windows",
-                        message: "The provider replied, but no session or weekly quota was in the payload.",
-                        actionTitle: "Open Settings",
-                        action: store.openSettings
-                    )
-                }
-            }
         case .signedOut(let message):
             EmptyStateView(
                 title: "Sign in / add key",
@@ -123,37 +157,34 @@ struct PopoverView: View {
                 actionTitle: "Try again",
                 action: { Task { await store.refreshSelected() } }
             )
+        case .ready(let snapshot) where snapshot.session == nil && snapshot.weekly == nil:
+            EmptyStateView(
+                title: "No usage windows",
+                message: "The provider replied, but no session or weekly quota was in the payload.",
+                actionTitle: "Open Settings",
+                action: store.openSettings
+            )
+        case .ready(let snapshot):
+            extraFooterRow(snapshot.extraFooter)
+        case .idle, .loading:
+            extraFooterRow(nil)
         }
     }
 
-    private var footer: some View {
-        VStack(spacing: 8) {
-            if case .ready(let snapshot) = store.selectedState, let extra = snapshot.extraFooter, !extra.isEmpty {
-                HStack {
-                    Spacer()
-                    Text(extra)
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(Theme.tertiary)
-                }
-            }
-            Divider().overlay(Theme.hairline)
-            HStack {
-                Button("Settings…") { store.openSettings() }
-                Spacer()
-                Button("Quit QuotaBar") { NSApp.terminate(nil) }
-            }
-            .buttonStyle(.plain)
-            .font(.system(size: 12))
-            .foregroundStyle(Theme.secondary)
+    private func extraFooterRow(_ text: String?) -> some View {
+        HStack {
+            Spacer()
+            Text(text ?? " ")
+                .font(.system(size: 10.5))
+                .foregroundStyle(Theme.tertiary)
+                .lineLimit(1)
+                .opacity((text == nil || text?.isEmpty == true) ? 0 : 1)
         }
+        .frame(maxWidth: .infinity, minHeight: Theme.statusRowHeight, maxHeight: Theme.statusRowHeight)
     }
 
-    private func placeholderMeter(title: String) -> some View {
-        UsageMeterRow(
-            window: UsageWindow(title: title, remainingPercent: 80, resetAt: Date().addingTimeInterval(4000)),
-            mode: .remaining,
-            now: store.now
-        )
+    private var showsAccountSwitcher: Bool {
+        store.selected == .chatgpt && store.visibleChatGPTAccounts.count >= 2
     }
 
     private var isLoading: Bool {

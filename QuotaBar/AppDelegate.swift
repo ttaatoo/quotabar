@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var eventMonitor: Any?
     private var cancellables = Set<AnyCancellable>()
     private let store = AppStore.shared
+    private var lastIntrinsicSize = NSSize(width: Theme.popoverWidth, height: Theme.popoverCompactHeight)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -41,12 +42,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         popover.animates = true
         popover.appearance = NSAppearance(named: .darkAqua)
-        let hosting = NSHostingController(rootView: PopoverView(store: store))
+        let hosting = NSHostingController(
+            rootView: PopoverView(store: store, onIntrinsicSizeChange: { [weak self] size in
+                Task { @MainActor [self] in
+                    guard let self = self else { return }
+                    self.applyPopoverContentSize(size)
+                }
+            })
+        )
         hosting.sizingOptions = [.intrinsicContentSize]
-        popover.contentSize = NSSize(width: Theme.popoverWidth, height: 420)
-        popover.contentViewController = hosting
-        popover.delegate = self
         self.popover = popover
+        // Hug the SwiftUI card. A tall placeholder (e.g. 420) leaves empty chrome
+        // above/below because NSPopover does not shrink on intrinsicContentSize alone.
+        popover.contentSize = lastIntrinsicSize
+        popover.contentViewController = hosting
+        paintPopoverChrome()
+        popover.delegate = self
     }
 
     private func bind() {
@@ -54,8 +65,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.renderStatusItem()
+                self?.schedulePopoverResize()
             }
             .store(in: &cancellables)
+    }
+
+    private func schedulePopoverResize() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.applyPopoverContentSize(self.lastIntrinsicSize)
+            self.paintPopoverChrome()
+        }
+    }
+
+    private func applyPopoverContentSize(_ size: CGSize) {
+        let height = ceil(size.height)
+        guard height > 1 else { return }
+        let next = NSSize(width: Theme.popoverWidth, height: height)
+        lastIntrinsicSize = next
+        if abs(popover.contentSize.height - next.height) > 0.5
+            || abs(popover.contentSize.width - next.width) > 0.5 {
+            popover.contentSize = next
+        }
+        paintPopoverChrome()
+    }
+
+    private func paintPopoverChrome() {
+        guard let view = popover.contentViewController?.view else { return }
+        let color = Theme.backgroundNSColor.cgColor
+        view.appearance = NSAppearance(named: .darkAqua)
+        view.wantsLayer = true
+        view.layer?.backgroundColor = color
+        if let parent = view.superview {
+            parent.appearance = NSAppearance(named: .darkAqua)
+            parent.wantsLayer = true
+            parent.layer?.backgroundColor = color
+        }
     }
 
     private func renderStatusItem() {
@@ -92,8 +137,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             popover.performClose(sender)
         } else {
             store.startClock()
+            applyPopoverContentSize(lastIntrinsicSize)
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
+            paintPopoverChrome()
             startEventMonitor()
             Task { await store.refreshSelected() }
         }
@@ -118,6 +165,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 extension AppDelegate: NSPopoverDelegate {
+    func popoverDidShow(_ notification: Notification) {
+        applyPopoverContentSize(lastIntrinsicSize)
+        paintPopoverChrome()
+    }
+
     func popoverDidClose(_ notification: Notification) {
         store.stopClock()
         stopEventMonitor()
