@@ -1,11 +1,30 @@
 import Foundation
 import Security
 
-enum KeychainAccount: String {
-    case cursorCookie = "cursor.cookie"
-    case chatgptCookie = "chatgpt.cookie"
-    case chatgptJSON = "chatgpt.usage-json"
-    case glmAPIKey = "glm.api-key"
+enum KeychainAccount: Hashable {
+    case cursorCookie
+    case chatgptCookie
+    case chatgptJSON
+    case glmAPIKey
+    case chatgptAccountCookie(UUID)
+    case chatgptAccountJSON(UUID)
+
+    var rawValue: String {
+        switch self {
+        case .cursorCookie:
+            return "cursor.cookie"
+        case .chatgptCookie:
+            return "chatgpt.cookie"
+        case .chatgptJSON:
+            return "chatgpt.usage-json"
+        case .glmAPIKey:
+            return "glm.api-key"
+        case .chatgptAccountCookie(let id):
+            return "chatgpt.cookie.\(id.uuidString)"
+        case .chatgptAccountJSON(let id):
+            return "chatgpt.json.\(id.uuidString)"
+        }
+    }
 }
 
 enum KeychainStore {

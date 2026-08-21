@@ -22,7 +22,7 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable, Hashable {
         case .cursor:
             return "Sign in to Cursor.app, or paste a WorkosCursorSessionToken cookie in Settings."
         case .chatgpt:
-            return "Paste a chatgpt.com session cookie in Settings, or the conversation_limit JSON from DevTools."
+            return "Add a ChatGPT account in Settings and paste a chatgpt.com session cookie, or the conversation_limit JSON from DevTools."
         case .glm:
             return "Paste a z.ai / BigModel API key in Settings, or set Z_AI_API_KEY."
         }

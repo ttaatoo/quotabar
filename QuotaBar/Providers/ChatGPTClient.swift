@@ -51,7 +51,8 @@ enum ChatGPTClient {
                 if response.statusCode == 404 { continue }
                 try HTTPClient.requireOK(response, data: data, host: "chatgpt.com")
                 let object = try JSONWalk.object(from: data)
-                if let snapshot = parseUsageObject(object, planName: planName, fetchedAt: now, source: .live) {
+                if var snapshot = parseUsageObject(object, planName: planName, fetchedAt: now, source: .live) {
+                    snapshot.accountEmail = identity.email
                     return snapshot
                 }
                 lastError = QuotaError.noUsableQuota("ChatGPT \(url.lastPathComponent) returned JSON without remaining/used percentages.")

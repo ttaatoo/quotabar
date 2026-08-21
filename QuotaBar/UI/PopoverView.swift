@@ -14,6 +14,18 @@ struct PopoverView: View {
                     set: { store.select($0) }
                 )
             )
+            if store.selected == .chatgpt, store.visibleChatGPTAccounts.count >= 2 {
+                ChatGPTAccountSwitcher(
+                    accounts: store.visibleChatGPTAccounts,
+                    selectedID: Binding(
+                        get: {
+                            store.settings.selectedChatGPTAccountId
+                                ?? store.visibleChatGPTAccounts[0].id
+                        },
+                        set: { store.selectChatGPTAccount($0) }
+                    )
+                )
+            }
             content
             footer
         }

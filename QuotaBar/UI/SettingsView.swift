@@ -3,6 +3,12 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var store: AppStore
 
+    @State private var isAddingAccount = false
+    @State private var addLabel = ""
+    @State private var renameID: UUID?
+    @State private var renameLabel = ""
+    @State private var deleteID: UUID?
+
     var body: some View {
         Form {
             Section("Providers") {
@@ -20,17 +26,53 @@ struct SettingsView: View {
             }
 
             Section("ChatGPT") {
-                SecureField("Session / cookie", text: $store.chatgptCookie)
-                    .textContentType(.password)
-                Text(verbatim: "Paste __Secure-next-auth.session-token=… or the full Cookie header from chatgpt.com.")
+                Text(verbatim: "Each account has its own session cookie (__Secure-next-auth.session-token=… or a full Cookie header) and optional conversation_limit JSON from DevTools. Secrets stay in the Keychain, not in config.json. Cursor and GLM stay single-account. QuotaBar never invents percentages.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                TextEditor(text: $store.chatgptJSON)
-                    .font(.system(.caption, design: .monospaced))
-                    .frame(minHeight: 84)
-                Text("Optional: paste official conversation_limit JSON from DevTools if the live endpoint does not return remaining quota. QuotaBar never invents percentages.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+
+                if store.settings.chatgptAccounts.isEmpty {
+                    Text("No ChatGPT accounts yet.")
+                        .foregroundStyle(.secondary)
+                }
+
+                ForEach(store.settings.chatgptAccounts) { account in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .firstTextBaseline) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(account.label)
+                                    .font(.headline)
+                                if let email = account.email, !email.isEmpty {
+                                    Text(email)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            Button("Rename") {
+                                renameID = account.id
+                                renameLabel = account.label
+                            }
+                            Button("Delete", role: .destructive) {
+                                deleteID = account.id
+                            }
+                        }
+
+                        SecureField("Session / cookie", text: cookieBinding(account.id))
+                            .textContentType(.password)
+                        Text("Optional conversation_limit JSON")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextEditor(text: jsonBinding(account.id))
+                            .font(.system(.caption, design: .monospaced))
+                            .frame(minHeight: 72)
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                Button("Add account") {
+                    addLabel = store.nextChatGPTLabel()
+                    isAddingAccount = true
+                }
             }
 
             Section("GLM") {
@@ -75,10 +117,8 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(minWidth: 420, minHeight: 520)
+        .frame(minWidth: 420, minHeight: 560)
         .onChange(of: store.cursorCookie) { _, _ in store.persistSecrets() }
-        .onChange(of: store.chatgptCookie) { _, _ in store.persistSecrets() }
-        .onChange(of: store.chatgptJSON) { _, _ in store.persistSecrets() }
         .onChange(of: store.glmAPIKey) { _, _ in store.persistSecrets() }
         .onChange(of: store.settings) { _, _ in
             store.persistSettings()
@@ -91,6 +131,66 @@ struct SettingsView: View {
             store.persistSecrets()
             store.persistSettings()
         }
+        .alert("Add ChatGPT account", isPresented: $isAddingAccount) {
+            TextField("Label (work, personal, plus…)", text: $addLabel)
+            Button("Add") {
+                _ = store.addChatGPTAccount(label: addLabel)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Give this account a name. You can paste its cookie and optional JSON after adding it.")
+        }
+        .alert("Rename account", isPresented: renamePresented) {
+            TextField("Label", text: $renameLabel)
+            Button("Save") {
+                if let renameID {
+                    store.renameChatGPTAccount(renameID, to: renameLabel)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog(
+            "Delete this ChatGPT account?",
+            isPresented: deletePresented,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let deleteID {
+                    store.deleteChatGPTAccount(deleteID)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The Keychain cookie and JSON for this account are removed. Other accounts are left alone.")
+        }
+    }
+
+    private var renamePresented: Binding<Bool> {
+        Binding(
+            get: { renameID != nil },
+            set: { if !$0 { renameID = nil } }
+        )
+    }
+
+    private var deletePresented: Binding<Bool> {
+        Binding(
+            get: { deleteID != nil },
+            set: { if !$0 { deleteID = nil } }
+        )
+    }
+
+    private func cookieBinding(_ id: UUID) -> Binding<String> {
+        Binding(
+            get: { store.chatgptCookies[id, default: ""] },
+            set: { store.setChatGPTCookie($0, for: id) }
+        )
+    }
+
+    private func jsonBinding(_ id: UUID) -> Binding<String> {
+        Binding(
+            get: { store.chatgptJSONs[id, default: ""] },
+            set: { store.setChatGPTJSON($0, for: id) }
+        )
     }
 
     private func enabledBinding(_ provider: ProviderKind) -> Binding<Bool> {

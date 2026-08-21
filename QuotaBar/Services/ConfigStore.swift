@@ -15,9 +15,23 @@ enum ConfigStore {
             migrateSecrets(from: file)
             shouldRewrite = file.glmApiKey != nil || file.cursorCookie != nil || file.chatgptCookie != nil
         }
+        let migratedLegacyChatGPT = migrateLegacyChatGPTAccounts(&settings)
+        if migratedLegacyChatGPT {
+            shouldRewrite = true
+        }
         settings.sanitize()
         if shouldRewrite {
             save(settings)
+        }
+        if configFileHasChatGPTAccounts() {
+            let superseded = settings.chatgptAccounts.contains { account in
+                KeychainStore.get(.chatgptAccountCookie(account.id)) != nil
+                    || KeychainStore.get(.chatgptAccountJSON(account.id)) != nil
+            }
+            if superseded {
+                KeychainStore.delete(.chatgptCookie)
+                KeychainStore.delete(.chatgptJSON)
+            }
         }
         return settings
     }
@@ -65,6 +79,58 @@ enum ConfigStore {
             KeychainStore.set(cookie, account: .chatgptCookie)
         }
     }
+
+    /// Moves the pre-multi-account ChatGPT cookie / JSON Keychain entries onto one
+    /// account labeled "ChatGPT" so existing users keep their credentials.
+    @discardableResult
+    static func migrateLegacyChatGPTAccounts(_ settings: inout AppSettings) -> Bool {
+        let legacyCookie = KeychainStore.get(.chatgptCookie)
+        let legacyJSON = KeychainStore.get(.chatgptJSON)
+
+        if settings.chatgptAccounts.isEmpty {
+            guard legacyCookie != nil || legacyJSON != nil else { return false }
+            let id = UUID()
+            settings.chatgptAccounts = [ChatGPTAccount(id: id, label: "ChatGPT", enabled: true)]
+            settings.selectedChatGPTAccountId = id
+            copyLegacyChatGPTSecrets(cookie: legacyCookie, json: legacyJSON, to: id)
+            return true
+        }
+
+        guard settings.chatgptAccounts.count == 1,
+              let id = settings.chatgptAccounts.first?.id,
+              legacyCookie != nil || legacyJSON != nil
+        else { return false }
+
+        let hasCookie = KeychainStore.get(.chatgptAccountCookie(id)) != nil
+        let hasJSON = KeychainStore.get(.chatgptAccountJSON(id)) != nil
+        var copied = false
+        if !hasCookie, let legacyCookie {
+            KeychainStore.set(legacyCookie, account: .chatgptAccountCookie(id))
+            copied = true
+        }
+        if !hasJSON, let legacyJSON {
+            KeychainStore.set(legacyJSON, account: .chatgptAccountJSON(id))
+            copied = true
+        }
+        return copied
+    }
+
+    private static func configFileHasChatGPTAccounts() -> Bool {
+        guard let data = try? Data(contentsOf: configURL),
+              let file = try? JSONDecoder().decode(ConfigFile.self, from: data),
+              let accounts = file.chatgptAccounts, !accounts.isEmpty
+        else { return false }
+        return true
+    }
+
+    private static func copyLegacyChatGPTSecrets(cookie: String?, json: String?, to id: UUID) {
+        if let cookie {
+            KeychainStore.set(cookie, account: .chatgptAccountCookie(id))
+        }
+        if let json {
+            KeychainStore.set(json, account: .chatgptAccountJSON(id))
+        }
+    }
 }
 
 private struct ConfigFile: Codable {
@@ -75,6 +141,8 @@ private struct ConfigFile: Codable {
     var glmRegion: GLMRegion?
     var previewFixtures: Bool?
     var launchAtLogin: Bool?
+    var chatgptAccounts: [ChatGPTAccount]?
+    var selectedChatGPTAccountId: UUID?
 
     /// Legacy / imported secrets. Written as null after migration.
     var glmApiKey: String?
@@ -89,6 +157,8 @@ private struct ConfigFile: Codable {
         glmRegion = settings.glmRegion
         previewFixtures = settings.previewFixtures
         launchAtLogin = settings.launchAtLogin
+        chatgptAccounts = settings.chatgptAccounts
+        selectedChatGPTAccountId = settings.selectedChatGPTAccountId
         glmApiKey = nil
         cursorCookie = nil
         chatgptCookie = nil
@@ -103,6 +173,8 @@ private struct ConfigFile: Codable {
         if let glmRegion { value.glmRegion = glmRegion }
         if let previewFixtures { value.previewFixtures = previewFixtures }
         if let launchAtLogin { value.launchAtLogin = launchAtLogin }
+        if let chatgptAccounts { value.chatgptAccounts = chatgptAccounts }
+        if let selectedChatGPTAccountId { value.selectedChatGPTAccountId = selectedChatGPTAccountId }
         return value
     }
 }

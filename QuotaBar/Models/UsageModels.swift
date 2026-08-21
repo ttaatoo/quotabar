@@ -52,6 +52,7 @@ struct UsageSnapshot: Equatable {
     var weekly: UsageWindow?
     var source: SnapshotSource
     var extraFooter: String?
+    var accountEmail: String? = nil
 
     var windows: [UsageWindow] {
         [session, weekly].compactMap { $0 }
