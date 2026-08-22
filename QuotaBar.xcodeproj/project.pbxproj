@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		000000000000000000000002 /* QuotaBarApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000001 /* QuotaBarApp.swift */; };
 		000000000000000000000004 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000003 /* AppDelegate.swift */; };
 		000000000000000000000006 /* ProviderKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000005 /* ProviderKind.swift */; };
 		000000000000000000000008 /* UsageModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000007 /* UsageModels.swift */; };
@@ -48,7 +47,6 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		000000000000000000000001 /* QuotaBarApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaBarApp.swift; sourceTree = "<group>"; };
 		000000000000000000000003 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		000000000000000000000005 /* ProviderKind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderKind.swift; sourceTree = "<group>"; };
 		000000000000000000000007 /* UsageModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageModels.swift; sourceTree = "<group>"; };
@@ -115,7 +113,6 @@
 		000000000000000000000040 /* QuotaBar */ = {
 			isa = PBXGroup;
 			children = (
-				000000000000000000000001 /* QuotaBarApp.swift */,
 				000000000000000000000003 /* AppDelegate.swift */,
 				00000000000000000000003D /* Info.plist */,
 				00000000000000000000003E /* QuotaBar.entitlements */,
@@ -288,7 +285,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				000000000000000000000002 /* QuotaBarApp.swift in Sources */,
 				000000000000000000000004 /* AppDelegate.swift in Sources */,
 				000000000000000000000006 /* ProviderKind.swift in Sources */,
 				000000000000000000000008 /* UsageModels.swift in Sources */,

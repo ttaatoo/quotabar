@@ -81,6 +81,25 @@ struct UsageSnapshot: Equatable {
         guard let remaining = chatGPTMenuRemaining else { return false }
         return remaining < 25
     }
+
+    /// Cursor menu bar: the pool they can still use. Cursor maps
+    /// `session` → Cursor Models and `weekly` → Other Models. Two pools
+    /// show the **higher** remaining (e.g. 44% + 0% → 44%). One pool
+    /// keeps `mostConstrainedRemaining`. All-unlimited stays `nil` (“—”).
+    var cursorMenuRemaining: Double? {
+        guard windows.count >= 2 else { return mostConstrainedRemaining }
+        if windows.allSatisfy(\.unlimited) {
+            return mostConstrainedRemaining
+        }
+        return windows.map { $0.unlimited ? 100 : $0.remainingPercent }.max()
+    }
+
+    /// Orange when any Cursor pool is below 25% remaining (including 0%).
+    /// A single pool uses the current `isLow` rule.
+    var isCursorMenuLow: Bool {
+        guard windows.count >= 2 else { return isLow }
+        return windows.contains { !$0.unlimited && $0.remainingPercent < 25 }
+    }
 }
 
 /// ChatGPT / `wham/usage` lanes by **duration**, not primary/secondary slot.
