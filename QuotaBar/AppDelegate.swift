@@ -21,7 +21,6 @@ final class QuotaBarApplication: NSApplication {
     }
 }
 
-@main
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
@@ -43,6 +42,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         store.persistSecrets()
         store.persistSettings()
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
     }
 
     private func setupStatusItem() {
