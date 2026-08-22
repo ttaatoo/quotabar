@@ -8,7 +8,7 @@ struct QuotaBarApp: App {
         // SwiftUI requires a Scene. Do not use `Settings { }` — that
         // registers an empty window titled "QuotaBar Settings".
         // Settings are SettingsWindowController via AppDelegate /
-        // QuotaBarApplication.showSettingsWindow:.
+        // QuotaBarApplication ObjC Settings selectors.
         MenuBarExtra(isInserted: .constant(false)) {
             EmptyView()
         } label: {

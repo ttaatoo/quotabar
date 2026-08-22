@@ -2,13 +2,23 @@ import AppKit
 import Combine
 import SwiftUI
 
-/// Intercepts AppKit’s Settings actions. `NSApplication` implements
-/// `showSettingsWindow:` itself, so `sendAction` would never reach the
-/// delegate — and a SwiftUI `Settings` scene would show an empty window
-/// titled “QuotaBar Settings”.
+/// Routes Settings to `SettingsWindowController`. Do not `override`
+/// `showSettingsWindow(_:)` — `NSApplication` does not declare that
+/// method on the macos-14 / Xcode 15.4 SDK (same class of trap as
+/// `NSHostingController.didMove`). Implement the ObjC selectors so
+/// Cmd+, / Settings still open the dark controller, never a SwiftUI
+/// Settings shell titled “QuotaBar Settings”.
 @objc(QuotaBarApplication)
 final class QuotaBarApplication: NSApplication {
-    override func showSettingsWindow(_ sender: Any?) {
+    @objc(showSettingsWindow:)
+    func openQuotaBarSettings(_ sender: Any?) {
+        Task { @MainActor in
+            SettingsPresenter.open()
+        }
+    }
+
+    @objc(showPreferencesWindow:)
+    func openQuotaBarPreferences(_ sender: Any?) {
         Task { @MainActor in
             SettingsPresenter.open()
         }
