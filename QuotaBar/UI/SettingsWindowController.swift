@@ -6,9 +6,9 @@ enum SettingsPresenter {
     static func open() {
         // Custom controller only. There is no SwiftUI Settings scene —
         // that registered an empty window titled “QuotaBar Settings”.
-        // Cmd+, / `showSettingsWindow:` are implemented on AppDelegate
-        // and QuotaBarApplication so a second click still orders this
-        // window front in an LSUIElement accessory app.
+        // Cmd+, / Settings selectors on AppDelegate and
+        // QuotaBarApplication order this window front in an LSUIElement
+        // accessory app. Do not call NSApplication.showSettingsWindow.
         SettingsWindowController.shared.show()
     }
 }
