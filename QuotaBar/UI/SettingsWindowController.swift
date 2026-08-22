@@ -4,9 +4,11 @@ import SwiftUI
 enum SettingsPresenter {
     @MainActor
     static func open() {
-        // Always the custom controller. `showSettingsWindow:` can return true
-        // for the unused SwiftUI Settings scene without ordering this window
-        // front — a second click then does nothing in an LSUIElement app.
+        // Custom controller only. There is no SwiftUI Settings scene —
+        // that registered an empty window titled “QuotaBar Settings”.
+        // Cmd+, / `showSettingsWindow:` are implemented on AppDelegate
+        // and QuotaBarApplication so a second click still orders this
+        // window front in an LSUIElement accessory app.
         SettingsWindowController.shared.show()
     }
 }
