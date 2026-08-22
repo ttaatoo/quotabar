@@ -13,12 +13,6 @@ final class QuotaBarApplication: NSApplication {
             SettingsPresenter.open()
         }
     }
-
-    override func showPreferencesWindow(_ sender: Any?) {
-        Task { @MainActor in
-            SettingsPresenter.open()
-        }
-    }
 }
 
 @MainActor
