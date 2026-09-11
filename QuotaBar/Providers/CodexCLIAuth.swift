@@ -123,6 +123,7 @@ enum CodexCLIAuth {
         switch raw.lowercased() {
         case "chatgptplusplan", "plus": return "Plus"
         case "chatgptproplan", "pro": return "Pro"
+        case "chatgptproliteplan", "prolite", "pro_lite", "pro-lite": return "Prolite"
         case "chatgptteamplan", "team": return "Team"
         case "chatgptenterpriseplan", "enterprise": return "Enterprise"
         case "free", "chatgptfreeplan": return "Free"

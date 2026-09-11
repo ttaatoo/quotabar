@@ -74,11 +74,18 @@ final class AppStore: ObservableObject {
     var accountCards: [AccountCardRow] {
         if selected == .chatgpt {
             return chatgptDisplayRows.map { row in
-                AccountCardRow(
+                let credentials: Bool
+                if let account = row.account {
+                    credentials = hasChatGPTCredentials(account.id)
+                } else {
+                    credentials = CodexCLIAuth.read() != nil
+                }
+                return AccountCardRow(
                     id: row.id.uuidString,
-                    email: row.account?.email,
+                    email: row.account?.email ?? row.state.snapshot?.accountEmail,
                     fallbackTitle: row.account?.label ?? "Email unknown",
-                    state: row.state
+                    state: row.state,
+                    hasCredentials: credentials
                 )
             }
         }
@@ -98,7 +105,8 @@ final class AppStore: ObservableObject {
                 id: selected.rawValue,
                 email: email,
                 fallbackTitle: fallback,
-                state: state
+                state: state,
+                hasCredentials: !state.isSignedOut
             )
         ]
     }
@@ -162,6 +170,37 @@ final class AppStore: ObservableObject {
     private func isSignedInChatGPT(_ id: UUID) -> Bool {
         if case .ready = chatgptStates[id] { return true }
         return false
+    }
+
+    /// Cookie, pasted JSON, or a readable `auth.json` for this account.
+    /// An email alone is not enough: the file may have been deleted.
+    func hasChatGPTCredentials(_ id: UUID) -> Bool {
+        let auth = chatGPTAuthInputs(for: id)
+        if auth.cookie != nil || auth.json != nil { return true }
+        if let home = CodexCLIAuth.homeURL(path: auth.home),
+           CodexCLIAuth.read(home: home) != nil {
+            return true
+        }
+        if auth.allowAmbient, CodexCLIAuth.read() != nil {
+            return true
+        }
+        return false
+    }
+
+    private func chatGPTAuthInputs(for id: UUID) -> (
+        cookie: String?,
+        json: String?,
+        home: String?,
+        allowAmbient: Bool,
+        email: String?
+    ) {
+        let account = settings.chatgptAccounts.first(where: { $0.id == id })
+        let cookie = emptyToNil(chatgptCookies[id, default: ""])
+        let json = emptyToNil(chatgptJSONs[id, default: ""])
+        let path = account?.codexHomePath
+        let hasScopedHome = CodexCLIAuth.homeURL(path: path) != nil
+        let allowAmbient = account?.usesAmbientCodexHome == true && !hasScopedHome
+        return (cookie, json, hasScopedHome ? path : nil, allowAmbient, account?.email)
     }
 
     private func signedInChatGPTAccountIDs() -> [UUID] {
@@ -466,6 +505,15 @@ final class AppStore: ObservableObject {
         await refresh(selected)
     }
 
+    func refreshCard(_ cardID: String) async {
+        if selected == .chatgpt, let id = UUID(uuidString: cardID),
+           settings.chatgptAccounts.contains(where: { $0.id == id }) {
+            await refreshChatGPTAccount(id, userInitiated: true)
+            return
+        }
+        await refreshSelected()
+    }
+
     func refreshAll() async {
         isRefreshing = true
         defer { isRefreshing = false }
@@ -509,8 +557,52 @@ final class AppStore: ObservableObject {
             }
             return
         }
-        for account in accounts {
-            await refreshChatGPTAccount(account.id, userInitiated: userInitiated)
+        var jobs: [ChatGPTFetchJob] = []
+        for (index, account) in accounts.enumerated() {
+            let current = chatgptStates[account.id] ?? .idle
+            if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+                chatgptStates[account.id] = .loading
+            }
+            let auth = chatGPTAuthInputs(for: account.id)
+            jobs.append(
+                ChatGPTFetchJob(
+                    id: account.id,
+                    previous: current,
+                    cookie: auth.cookie,
+                    json: auth.json,
+                    home: auth.home,
+                    allowAmbient: auth.allowAmbient,
+                    email: auth.email,
+                    preview: settings.previewFixtures,
+                    variant: index
+                )
+            )
+        }
+
+        var results: [(UUID, ProviderLoadState, Result<UsageSnapshot, Error>)] = []
+        await withTaskGroup(of: (UUID, ProviderLoadState, Result<UsageSnapshot, Error>).self) { group in
+            for job in jobs {
+                group.addTask {
+                    await Self.performChatGPTFetch(job)
+                }
+            }
+            for await item in group {
+                results.append(item)
+            }
+        }
+
+        for (id, previous, result) in results {
+            switch result {
+            case .success(let snapshot):
+                chatgptStates[id] = .ready(snapshot)
+                recordChatGPTEmail(snapshot.accountEmail, for: id)
+            case .failure(let error):
+                chatgptStates[id] = chatGPTFailureState(
+                    previous: previous,
+                    id: id,
+                    error: error
+                )
+            }
         }
         ensureActiveChatGPTAccount()
     }
@@ -518,40 +610,98 @@ final class AppStore: ObservableObject {
     private func refreshChatGPTAccount(_ id: UUID, userInitiated: Bool) async {
         guard settings.chatgptAccounts.contains(where: { $0.id == id }) else { return }
         let current = chatgptStates[id] ?? .idle
-        if userInitiated || shouldShowLoading(current) {
+        // Keep last meters while refreshing. Opening the popover used to
+        // flash every card to "Updating…" and then paint a false Sign in
+        // if one fetch failed.
+        if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
             chatgptStates[id] = .loading
         }
 
-        do {
-            let snapshot: UsageSnapshot
-            if settings.previewFixtures {
-                snapshot = try FixtureLoader.load(.chatgpt, now: Date())
-            } else {
-                snapshot = try await ChatGPTClient.fetch(
-                    cookie: emptyToNil(chatgptCookies[id, default: ""]),
-                    pastedJSON: emptyToNil(chatgptJSONs[id, default: ""]),
-                    codexHomePath: settings.chatgptAccounts.first(where: { $0.id == id })?.codexHomePath,
-                    allowAmbientCodex: false
-                )
-            }
+        let index = settings.chatgptAccounts.firstIndex(where: { $0.id == id }) ?? 0
+        let auth = chatGPTAuthInputs(for: id)
+        let job = ChatGPTFetchJob(
+            id: id,
+            previous: current,
+            cookie: auth.cookie,
+            json: auth.json,
+            home: auth.home,
+            allowAmbient: auth.allowAmbient,
+            email: auth.email,
+            preview: settings.previewFixtures,
+            variant: index
+        )
+        let (_, previous, result) = await Self.performChatGPTFetch(job)
+        switch result {
+        case .success(let snapshot):
             chatgptStates[id] = .ready(snapshot)
             recordChatGPTEmail(snapshot.accountEmail, for: id)
-        } catch let error as QuotaError {
-            if error.isAuthFailure {
-                chatgptStates[id] = .signedOut(error.errorDescription ?? ProviderKind.chatgpt.signInHint)
-            } else {
-                chatgptStates[id] = .failure(error.errorDescription ?? "Something went wrong.")
-            }
-        } catch {
-            chatgptStates[id] = .failure(error.localizedDescription)
+        case .failure(let error):
+            chatgptStates[id] = chatGPTFailureState(
+                previous: previous,
+                id: id,
+                error: error
+            )
         }
+    }
+
+    private static func performChatGPTFetch(
+        _ job: ChatGPTFetchJob
+    ) async -> (UUID, ProviderLoadState, Result<UsageSnapshot, Error>) {
+        do {
+            let snapshot: UsageSnapshot
+            if job.preview {
+                snapshot = try FixtureLoader.load(
+                    .chatgpt,
+                    now: Date(),
+                    variant: job.variant,
+                    emailOverride: job.email
+                )
+            } else {
+                snapshot = try await ChatGPTClient.fetch(
+                    cookie: job.cookie,
+                    pastedJSON: job.json,
+                    codexHomePath: job.home,
+                    allowAmbientCodex: job.allowAmbient,
+                    expectedEmail: job.email
+                )
+            }
+            return (job.id, job.previous, .success(snapshot))
+        } catch {
+            return (job.id, job.previous, .failure(error))
+        }
+    }
+
+    /// Auth failure without credentials → signed out. Anything else keeps the
+    /// last snapshot so switching or a sibling fetch cannot wipe a good card.
+    private func chatGPTFailureState(
+        previous: ProviderLoadState,
+        id: UUID,
+        error: Error
+    ) -> ProviderLoadState {
+        let message: String
+        let authFailure: Bool
+        if let quota = error as? QuotaError {
+            message = quota.errorDescription ?? ProviderKind.chatgpt.signInHint
+            authFailure = quota.isAuthFailure
+        } else {
+            message = error.localizedDescription
+            authFailure = false
+        }
+
+        if case .ready(let snapshot) = previous {
+            return .ready(snapshot)
+        }
+        if authFailure, !hasChatGPTCredentials(id) {
+            return .signedOut(message)
+        }
+        return .failure(message)
     }
 
     /// Uses ~/.codex/auth.json when no ChatGPT account has been added yet.
     /// Does not persist a new account on each launch.
     private func refreshImplicitChatGPT(userInitiated: Bool) async {
         let current = states[.chatgpt] ?? .idle
-        if userInitiated || shouldShowLoading(current) {
+        if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
             states[.chatgpt] = .loading
         }
         do {
@@ -561,20 +711,20 @@ final class AppStore: ObservableObject {
                 allowAmbientCodex: true
             )
             states[.chatgpt] = .ready(snapshot)
-        } catch let error as QuotaError {
-            if error.isAuthFailure {
-                states[.chatgpt] = .signedOut(error.errorDescription ?? ProviderKind.chatgpt.signInHint)
-            } else {
-                states[.chatgpt] = .failure(error.errorDescription ?? "Something went wrong.")
-            }
         } catch {
-            states[.chatgpt] = .failure(error.localizedDescription)
+            if case .ready(let snapshot) = current {
+                states[.chatgpt] = .ready(snapshot)
+            } else if let quota = error as? QuotaError, quota.isAuthFailure {
+                states[.chatgpt] = .signedOut(quota.errorDescription ?? ProviderKind.chatgpt.signInHint)
+            } else {
+                states[.chatgpt] = .failure(error.localizedDescription)
+            }
         }
     }
 
-    private func refreshChatGPTPreviewFallback(userInitiated: Bool) async {
+    private func refreshChatGPTPreviewFallback(userInitiated _: Bool) async {
         let current = states[.chatgpt] ?? .idle
-        if userInitiated || shouldShowLoading(current) {
+        if shouldShowLoading(current) {
             states[.chatgpt] = .loading
         }
         do {
@@ -637,11 +787,13 @@ final class AppStore: ObservableObject {
             guard let id = settings.selectedChatGPTAccountId else {
                 return try await ChatGPTClient.fetch(cookie: nil, pastedJSON: nil, allowAmbientCodex: true)
             }
+            let auth = chatGPTAuthInputs(for: id)
             return try await ChatGPTClient.fetch(
-                cookie: emptyToNil(chatgptCookies[id, default: ""]),
-                pastedJSON: emptyToNil(chatgptJSONs[id, default: ""]),
-                codexHomePath: settings.chatgptAccounts.first(where: { $0.id == id })?.codexHomePath,
-                allowAmbientCodex: false
+                cookie: auth.cookie,
+                pastedJSON: auth.json,
+                codexHomePath: auth.home,
+                allowAmbientCodex: auth.allowAmbient,
+                expectedEmail: auth.email
             )
         case .glm:
             return try await GLMClient.fetch(apiKey: emptyToNil(glmAPIKey), region: settings.glmRegion)
@@ -658,6 +810,18 @@ final class AppStore: ObservableObject {
     static let implicitChatGPTID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
 }
 
+private struct ChatGPTFetchJob {
+    var id: UUID
+    var previous: ProviderLoadState
+    var cookie: String?
+    var json: String?
+    var home: String?
+    var allowAmbient: Bool
+    var email: String?
+    var preview: Bool
+    var variant: Int
+}
+
 struct ChatGPTDisplayRow: Identifiable, Equatable {
     var id: UUID
     var account: ChatGPTAccount?
@@ -669,4 +833,5 @@ struct AccountCardRow: Identifiable, Equatable {
     var email: String?
     var fallbackTitle: String
     var state: ProviderLoadState
+    var hasCredentials: Bool = false
 }

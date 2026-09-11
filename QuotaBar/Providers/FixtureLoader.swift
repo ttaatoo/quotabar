@@ -1,7 +1,12 @@
 import Foundation
 
 enum FixtureLoader {
-    static func load(_ provider: ProviderKind, now: Date = Date()) throws -> UsageSnapshot {
+    static func load(
+        _ provider: ProviderKind,
+        now: Date = Date(),
+        variant: Int = 0,
+        emailOverride: String? = nil
+    ) throws -> UsageSnapshot {
         guard let url = Bundle.main.url(forResource: provider.rawValue, withExtension: "json", subdirectory: "Fixtures")
                 ?? Bundle.main.url(forResource: provider.rawValue, withExtension: "json")
         else {
@@ -18,7 +23,7 @@ enum FixtureLoader {
             guard let parsed = ChatGPTClient.parseUsageObject(object, planName: nil, fetchedAt: now, source: .fixture) else {
                 throw QuotaError.schema("ChatGPT fixture had no usable windows.")
             }
-            snapshot = parsed
+            snapshot = varyChatGPT(parsed, variant: variant)
         case .glm:
             snapshot = try GLMClient.parse(object, fetchedAt: now)
         case .grok:
@@ -28,7 +33,7 @@ enum FixtureLoader {
         }
         snapshot.source = .fixture
         snapshot.fetchedAt = now
-        if let email = snapshot.accountEmail ?? JSONWalk.string(object, keys: ["email", "accountEmail"]) {
+        if let email = emailOverride ?? snapshot.accountEmail ?? JSONWalk.string(object, keys: ["email", "accountEmail"]) {
             snapshot.accountEmail = email
         }
         if var session = snapshot.session {
@@ -40,5 +45,29 @@ enum FixtureLoader {
             snapshot.weekly = weekly
         }
         return snapshot
+    }
+
+    /// Distinct preview cards so multi-account ChatGPT is screenshottable.
+    /// Variant 0 keeps the bundled Plus session+weekly; later variants drop
+    /// Session (Plus / Prolite / Free often publish only Weekly).
+    private static func varyChatGPT(_ snapshot: UsageSnapshot, variant: Int) -> UsageSnapshot {
+        guard variant > 0 else { return snapshot }
+        var snap = snapshot
+        let remainingChoices = [12.0, 67.0, 34.0]
+        let remaining = remainingChoices[(variant - 1) % remainingChoices.count]
+        let weekly = UsageWindow(
+            title: "Weekly",
+            remainingPercent: remaining,
+            usedPercent: 100 - remaining,
+            resetAt: snapshot.weekly?.resetAt ?? snapshot.session?.resetAt
+        )
+        snap.session = nil
+        snap.weekly = weekly
+        switch variant % 3 {
+        case 1: snap.planName = "Prolite"
+        case 2: snap.planName = "Free"
+        default: snap.planName = snapshot.planName ?? "Plus"
+        }
+        return snap
     }
 }
