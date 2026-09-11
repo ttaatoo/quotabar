@@ -12,8 +12,8 @@ xcodebuild \
   -scheme QuotaBar \
   -configuration Release \
   -derivedDataPath "$DERIVED" \
-  MARKETING_VERSION=0.0.11 \
-  CURRENT_PROJECT_VERSION=0.0.11 \
+  MARKETING_VERSION=0.0.12 \
+  CURRENT_PROJECT_VERSION=0.0.12 \
   CODE_SIGN_IDENTITY="-" \
   CODE_SIGNING_ALLOWED=YES \
   CODE_SIGNING_REQUIRED=NO \
