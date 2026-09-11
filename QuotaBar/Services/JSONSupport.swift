@@ -96,6 +96,19 @@ enum JWT {
         }
         return sub.isEmpty ? nil : sub
     }
+
+    static func expiration(_ token: String) -> Date? {
+        guard let payload = payload(token),
+              let exp = JSONNumber.double(from: payload["exp"])
+        else { return nil }
+        return Date(timeIntervalSince1970: exp)
+    }
+
+    /// Unknown `exp` is treated as still usable so callers can try the token.
+    static func isExpired(_ token: String, skew: TimeInterval = 60) -> Bool {
+        guard let expiration = expiration(token) else { return false }
+        return Date().addingTimeInterval(skew) >= expiration
+    }
 }
 
 enum Percent {

@@ -145,6 +145,9 @@ private struct ConfigFile: Codable {
     var chatgptAccounts: [ChatGPTAccount]?
     var selectedChatGPTAccountId: UUID?
     var didIntroduceGrok: Bool?
+    var opencodeGoAccounts: [OpenCodeGoAccount]?
+    var selectedOpenCodeGoAccountId: UUID?
+    var didIntroduceOpenCodeGo: Bool?
 
     /// Legacy / imported secrets. Written as null after migration.
     var glmApiKey: String?
@@ -162,6 +165,9 @@ private struct ConfigFile: Codable {
         chatgptAccounts = settings.chatgptAccounts
         selectedChatGPTAccountId = settings.selectedChatGPTAccountId
         didIntroduceGrok = settings.didIntroduceGrok
+        opencodeGoAccounts = settings.opencodeGoAccounts
+        selectedOpenCodeGoAccountId = settings.selectedOpenCodeGoAccountId
+        didIntroduceOpenCodeGo = settings.didIntroduceOpenCodeGo
         glmApiKey = nil
         cursorCookie = nil
         chatgptCookie = nil
@@ -180,6 +186,10 @@ private struct ConfigFile: Codable {
         if let selectedChatGPTAccountId { value.selectedChatGPTAccountId = selectedChatGPTAccountId }
         // Missing key = pre-Grok config. sanitize() appends Grok once.
         value.didIntroduceGrok = didIntroduceGrok ?? false
+        if let opencodeGoAccounts { value.opencodeGoAccounts = opencodeGoAccounts }
+        if let selectedOpenCodeGoAccountId { value.selectedOpenCodeGoAccountId = selectedOpenCodeGoAccountId }
+        // Missing key = pre-OpenCode config. sanitize() appends OpenCode Go once.
+        value.didIntroduceOpenCodeGo = didIntroduceOpenCodeGo ?? false
         return value
     }
 }

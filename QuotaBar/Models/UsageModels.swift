@@ -50,12 +50,13 @@ struct UsageSnapshot: Equatable {
     var fetchedAt: Date
     var session: UsageWindow?
     var weekly: UsageWindow?
+    var monthly: UsageWindow? = nil
     var source: SnapshotSource
     var extraFooter: String?
     var accountEmail: String? = nil
 
     var windows: [UsageWindow] {
-        [session, weekly].compactMap { $0 }
+        [session, weekly, monthly].compactMap { $0 }
     }
 
     var mostConstrainedRemaining: Double? {

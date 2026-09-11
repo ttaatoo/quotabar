@@ -8,6 +8,7 @@ final class AppStore: ObservableObject {
     @Published var settings: AppSettings
     @Published var states: [ProviderKind: ProviderLoadState]
     @Published var chatgptStates: [UUID: ProviderLoadState] = [:]
+    @Published var opencodeGoStates: [UUID: ProviderLoadState] = [:]
     @Published var now: Date = Date()
     @Published var isRefreshing = false
 
@@ -16,6 +17,7 @@ final class AppStore: ObservableObject {
     @Published var chatgptJSONs: [UUID: String] = [:]
     @Published var glmAPIKey: String = ""
     @Published var grokOAuthToken: String = ""
+    @Published var opencodeGoAPIKeys: [UUID: String] = [:]
 
     private var pollTimer: Timer?
     private var clockTimer: Timer?
@@ -29,6 +31,7 @@ final class AppStore: ObservableObject {
         glmAPIKey = KeychainStore.get(.glmAPIKey) ?? ""
         grokOAuthToken = KeychainStore.get(.grokOAuthToken) ?? ""
         loadChatGPTSecrets()
+        loadOpenCodeGoSecrets()
     }
 
     var selected: ProviderKind { settings.selectedProvider }
@@ -41,11 +44,36 @@ final class AppStore: ObservableObject {
         if selected == .chatgpt {
             return activeChatGPTState
         }
+        if selected == .opencodeGo {
+            return activeOpenCodeGoState
+        }
         return states[selected] ?? .idle
     }
 
     /// Card in the ChatGPT tab that is active for the menu bar.
     /// Implicit / empty ChatGPT (no saved accounts) has a single card that is active.
+    func isActiveAccountCard(_ cardID: String) -> Bool {
+        switch selected {
+        case .chatgpt:
+            return isActiveChatGPTCard(cardID)
+        case .opencodeGo:
+            return isActiveOpenCodeGoCard(cardID)
+        default:
+            return false
+        }
+    }
+
+    func activateAccountCard(_ cardID: String) {
+        switch selected {
+        case .chatgpt:
+            activateChatGPTCard(cardID)
+        case .opencodeGo:
+            activateOpenCodeGoCard(cardID)
+        default:
+            break
+        }
+    }
+
     func isActiveChatGPTCard(_ cardID: String) -> Bool {
         guard selected == .chatgpt else { return false }
         if settings.chatgptAccounts.isEmpty {
@@ -70,7 +98,7 @@ final class AppStore: ObservableObject {
             ?? GrokAuth.loadAuthFile()?.email
     }
 
-    /// One card per ChatGPT account; Cursor / GLM / Grok are a single card each.
+    /// One card per ChatGPT / OpenCode account; Cursor / GLM / Grok are a single card each.
     var accountCards: [AccountCardRow] {
         if selected == .chatgpt {
             return chatgptDisplayRows.map { row in
@@ -84,6 +112,23 @@ final class AppStore: ObservableObject {
                     id: row.id.uuidString,
                     email: row.account?.email ?? row.state.snapshot?.accountEmail,
                     fallbackTitle: row.account?.label ?? "Email unknown",
+                    state: row.state,
+                    hasCredentials: credentials
+                )
+            }
+        }
+        if selected == .opencodeGo {
+            return opencodeGoDisplayRows.map { row in
+                let credentials: Bool
+                if let account = row.account {
+                    credentials = hasOpenCodeGoCredentials(account.id)
+                } else {
+                    credentials = OpenCodeGoClient.resolveToken(explicit: nil) != nil
+                }
+                return AccountCardRow(
+                    id: row.id.uuidString,
+                    email: row.account?.email ?? row.state.snapshot?.accountEmail,
+                    fallbackTitle: row.account?.label ?? "OpenCode",
                     state: row.state,
                     hasCredentials: credentials
                 )
@@ -303,6 +348,7 @@ final class AppStore: ObservableObject {
         KeychainStore.set(glmAPIKey, account: .glmAPIKey)
         KeychainStore.set(grokOAuthToken, account: .grokOAuthToken)
         persistChatGPTSecrets()
+        persistOpenCodeGoSecrets()
     }
 
     private func persistChatGPTSecrets() {
@@ -396,6 +442,28 @@ final class AppStore: ObservableObject {
         let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
         settings.chatgptAccounts[index].label = trimmed.isEmpty ? "ChatGPT" : trimmed
         persistSettings()
+    }
+
+    func applyChatGPTRelogin(
+        accountId: UUID,
+        homePath: String,
+        email: String?,
+        ambient: Bool
+    ) {
+        guard let index = settings.chatgptAccounts.firstIndex(where: { $0.id == accountId }) else { return }
+        let previousHome = settings.chatgptAccounts[index].codexHomePath
+        let standardizedHome = CodexCLIAuth.homeURL(path: homePath)?.path(percentEncoded: false) ?? homePath
+        settings.chatgptAccounts[index].codexHomePath = standardizedHome
+        settings.chatgptAccounts[index].usesAmbientCodexHome = ambient
+        if let trimmed = CodexCLIAuth.usableEmail(email) {
+            settings.chatgptAccounts[index].email = trimmed
+        }
+        if previousHome != standardizedHome {
+            CodexCLIAuth.removeManagedHomeIfSafe(previousHome)
+        }
+        settings.selectedChatGPTAccountId = accountId
+        persistSettings()
+        Task { await refreshChatGPTAccount(accountId, userInitiated: true) }
     }
 
     func deleteChatGPTAccount(_ id: UUID) {
@@ -502,6 +570,10 @@ final class AppStore: ObservableObject {
             await refreshAllChatGPTAccounts(userInitiated: true)
             return
         }
+        if selected == .opencodeGo {
+            await refreshAllOpenCodeGoAccounts(userInitiated: true)
+            return
+        }
         await refresh(selected)
     }
 
@@ -509,6 +581,11 @@ final class AppStore: ObservableObject {
         if selected == .chatgpt, let id = UUID(uuidString: cardID),
            settings.chatgptAccounts.contains(where: { $0.id == id }) {
             await refreshChatGPTAccount(id, userInitiated: true)
+            return
+        }
+        if selected == .opencodeGo, let id = UUID(uuidString: cardID),
+           settings.opencodeGoAccounts.contains(where: { $0.id == id }) {
+            await refreshOpenCodeGoAccount(id, userInitiated: true)
             return
         }
         await refreshSelected()
@@ -525,6 +602,10 @@ final class AppStore: ObservableObject {
     func refresh(_ provider: ProviderKind) async {
         if provider == .chatgpt {
             await refreshAllChatGPTAccounts(userInitiated: false)
+            return
+        }
+        if provider == .opencodeGo {
+            await refreshAllOpenCodeGoAccounts(userInitiated: false)
             return
         }
         states[provider] = .loading
@@ -799,6 +880,11 @@ final class AppStore: ObservableObject {
             return try await GLMClient.fetch(apiKey: emptyToNil(glmAPIKey), region: settings.glmRegion)
         case .grok:
             return try await GrokClient.fetch(pastedToken: emptyToNil(grokOAuthToken))
+        case .opencodeGo:
+            if let id = settings.selectedOpenCodeGoAccountId {
+                return try await OpenCodeGoClient.fetch(apiKey: emptyToNil(opencodeGoAPIKeys[id, default: ""]))
+            }
+            return try await OpenCodeGoClient.fetch(apiKey: nil)
         }
     }
 
@@ -826,6 +912,362 @@ struct ChatGPTDisplayRow: Identifiable, Equatable {
     var id: UUID
     var account: ChatGPTAccount?
     var state: ProviderLoadState
+}
+
+struct OpenCodeGoDisplayRow: Identifiable, Equatable {
+    var id: UUID
+    var account: OpenCodeGoAccount?
+    var state: ProviderLoadState
+}
+
+extension AppStore {
+    static let implicitOpenCodeGoID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+
+    var visibleOpenCodeGoAccounts: [OpenCodeGoAccount] {
+        settings.visibleOpenCodeGoAccounts
+    }
+
+    func isActiveOpenCodeGoCard(_ cardID: String) -> Bool {
+        guard selected == .opencodeGo else { return false }
+        if settings.opencodeGoAccounts.isEmpty {
+            return true
+        }
+        guard let active = activeOpenCodeGoAccountId else { return false }
+        return cardID == active.uuidString
+    }
+
+    func activateOpenCodeGoCard(_ cardID: String) {
+        guard selected == .opencodeGo else { return }
+        guard let id = UUID(uuidString: cardID) else { return }
+        selectOpenCodeGoAccount(id)
+    }
+
+    var opencodeGoDisplayRows: [OpenCodeGoDisplayRow] {
+        if !settings.opencodeGoAccounts.isEmpty {
+            return visibleOpenCodeGoAccounts.map { account in
+                OpenCodeGoDisplayRow(
+                    id: account.id,
+                    account: account,
+                    state: opencodeGoStates[account.id] ?? .idle
+                )
+            }
+        }
+        let implicit = states[.opencodeGo] ?? .idle
+        switch implicit {
+        case .ready, .loading, .failure:
+            return [OpenCodeGoDisplayRow(id: Self.implicitOpenCodeGoID, account: nil, state: implicit)]
+        case .idle:
+            if settings.previewFixtures {
+                return [OpenCodeGoDisplayRow(id: Self.implicitOpenCodeGoID, account: nil, state: implicit)]
+            }
+            return []
+        case .signedOut:
+            return []
+        }
+    }
+
+    var activeOpenCodeGoAccountId: UUID? {
+        if settings.opencodeGoAccounts.isEmpty { return nil }
+        let visible = visibleOpenCodeGoAccounts
+        if let selected = settings.selectedOpenCodeGoAccountId,
+           visible.contains(where: { $0.id == selected }) {
+            return selected
+        }
+        if let signedIn = visible.first(where: { isSignedInOpenCodeGo($0.id) }) {
+            return signedIn.id
+        }
+        return nil
+    }
+
+    private var activeOpenCodeGoState: ProviderLoadState {
+        if settings.opencodeGoAccounts.isEmpty {
+            return openCodeGoState(for: nil)
+        }
+        if let id = activeOpenCodeGoAccountId {
+            return opencodeGoStates[id] ?? .idle
+        }
+        return .signedOut(ProviderKind.opencodeGo.signInHint)
+    }
+
+    private func isSignedInOpenCodeGo(_ id: UUID) -> Bool {
+        if case .ready = opencodeGoStates[id] { return true }
+        return false
+    }
+
+    func hasOpenCodeGoCredentials(_ id: UUID) -> Bool {
+        emptyToNil(opencodeGoAPIKeys[id, default: ""]) != nil
+    }
+
+    func selectOpenCodeGoAccount(_ id: UUID) {
+        guard settings.opencodeGoAccounts.contains(where: { $0.id == id }) else { return }
+        guard settings.selectedOpenCodeGoAccountId != id else { return }
+        settings.selectedOpenCodeGoAccountId = id
+        persistSettings()
+    }
+
+    func nextOpenCodeGoLabel() -> String {
+        let existing = Set(settings.opencodeGoAccounts.map(\.label))
+        if !existing.contains("OpenCode") { return "OpenCode" }
+        var index = 2
+        while existing.contains("OpenCode \(index)") {
+            index += 1
+        }
+        return "OpenCode \(index)"
+    }
+
+    @discardableResult
+    func addOpenCodeGoAccount(label: String? = nil) -> UUID {
+        let id = UUID()
+        let trimmed = label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let resolved = trimmed.isEmpty ? nextOpenCodeGoLabel() : trimmed
+        settings.opencodeGoAccounts.append(OpenCodeGoAccount(id: id, label: resolved, enabled: true))
+        if settings.selectedOpenCodeGoAccountId == nil {
+            settings.selectedOpenCodeGoAccountId = id
+        }
+        opencodeGoAPIKeys[id] = ""
+        opencodeGoStates[id] = .idle
+        persistSettings()
+        return id
+    }
+
+    func renameOpenCodeGoAccount(_ id: UUID, to label: String) {
+        guard let index = settings.opencodeGoAccounts.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        settings.opencodeGoAccounts[index].label = trimmed.isEmpty ? "OpenCode" : trimmed
+        persistSettings()
+    }
+
+    func deleteOpenCodeGoAccount(_ id: UUID) {
+        settings.opencodeGoAccounts.removeAll { $0.id == id }
+        opencodeGoAPIKeys[id] = nil
+        opencodeGoStates[id] = nil
+        KeychainStore.delete(.opencodeGoAPIKey(id))
+        if settings.selectedOpenCodeGoAccountId == id {
+            settings.selectedOpenCodeGoAccountId = nil
+            settings.resolveSelectedOpenCodeGoAccount(preferring: signedInOpenCodeGoAccountIDs())
+        }
+        persistSettings()
+    }
+
+    func setOpenCodeGoAPIKey(_ value: String, for id: UUID) {
+        opencodeGoAPIKeys[id] = value
+        KeychainStore.set(value, account: .opencodeGoAPIKey(id))
+    }
+
+    fileprivate func persistOpenCodeGoSecrets() {
+        for account in settings.opencodeGoAccounts {
+            KeychainStore.set(opencodeGoAPIKeys[account.id], account: .opencodeGoAPIKey(account.id))
+        }
+    }
+
+    fileprivate func loadOpenCodeGoSecrets() {
+        for account in settings.opencodeGoAccounts {
+            opencodeGoAPIKeys[account.id] = KeychainStore.get(.opencodeGoAPIKey(account.id)) ?? ""
+            opencodeGoStates[account.id] = .idle
+        }
+    }
+
+    fileprivate func refreshAllOpenCodeGoAccounts(userInitiated: Bool) async {
+        let accounts = settings.opencodeGoAccounts
+        if accounts.isEmpty {
+            await refreshImplicitOpenCodeGo(userInitiated: userInitiated)
+            return
+        }
+        var jobs: [OpenCodeGoFetchJob] = []
+        for (index, account) in accounts.enumerated() {
+            let current = opencodeGoStates[account.id] ?? .idle
+            if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+                opencodeGoStates[account.id] = .loading
+            }
+            jobs.append(
+                OpenCodeGoFetchJob(
+                    id: account.id,
+                    previous: current,
+                    apiKey: emptyToNil(opencodeGoAPIKeys[account.id, default: ""]),
+                    email: account.email,
+                    preview: settings.previewFixtures,
+                    variant: index
+                )
+            )
+        }
+
+        var results: [(UUID, ProviderLoadState, Result<UsageSnapshot, Error>)] = []
+        await withTaskGroup(of: (UUID, ProviderLoadState, Result<UsageSnapshot, Error>).self) { group in
+            for job in jobs {
+                group.addTask {
+                    await Self.performOpenCodeGoFetch(job)
+                }
+            }
+            for await item in group {
+                results.append(item)
+            }
+        }
+
+        for (id, previous, result) in results {
+            switch result {
+            case .success(let snapshot):
+                opencodeGoStates[id] = .ready(snapshot)
+                recordOpenCodeGoEmail(snapshot.accountEmail, for: id)
+            case .failure(let error):
+                opencodeGoStates[id] = openCodeGoFailureState(
+                    previous: previous,
+                    id: id,
+                    error: error
+                )
+            }
+        }
+        ensureActiveOpenCodeGoAccount()
+    }
+
+    fileprivate func refreshOpenCodeGoAccount(_ id: UUID, userInitiated: Bool) async {
+        guard settings.opencodeGoAccounts.contains(where: { $0.id == id }) else { return }
+        let current = opencodeGoStates[id] ?? .idle
+        if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+            opencodeGoStates[id] = .loading
+        }
+        let index = settings.opencodeGoAccounts.firstIndex(where: { $0.id == id }) ?? 0
+        let account = settings.opencodeGoAccounts.first(where: { $0.id == id })
+        let job = OpenCodeGoFetchJob(
+            id: id,
+            previous: current,
+            apiKey: emptyToNil(opencodeGoAPIKeys[id, default: ""]),
+            email: account?.email,
+            preview: settings.previewFixtures,
+            variant: index
+        )
+        let (_, previous, result) = await Self.performOpenCodeGoFetch(job)
+        switch result {
+        case .success(let snapshot):
+            opencodeGoStates[id] = .ready(snapshot)
+            recordOpenCodeGoEmail(snapshot.accountEmail, for: id)
+        case .failure(let error):
+            opencodeGoStates[id] = openCodeGoFailureState(
+                previous: previous,
+                id: id,
+                error: error
+            )
+        }
+    }
+
+    private static func performOpenCodeGoFetch(
+        _ job: OpenCodeGoFetchJob
+    ) async -> (UUID, ProviderLoadState, Result<UsageSnapshot, Error>) {
+        do {
+            let snapshot: UsageSnapshot
+            if job.preview {
+                snapshot = try FixtureLoader.load(
+                    .opencodeGo,
+                    now: Date(),
+                    variant: job.variant,
+                    emailOverride: job.email
+                )
+            } else {
+                snapshot = try await OpenCodeGoClient.fetch(apiKey: job.apiKey)
+            }
+            return (job.id, job.previous, .success(snapshot))
+        } catch {
+            return (job.id, job.previous, .failure(error))
+        }
+    }
+
+    private func openCodeGoFailureState(
+        previous: ProviderLoadState,
+        id: UUID,
+        error: Error
+    ) -> ProviderLoadState {
+        let message: String
+        let authFailure: Bool
+        if let quota = error as? QuotaError {
+            message = quota.errorDescription ?? ProviderKind.opencodeGo.signInHint
+            authFailure = quota.isAuthFailure
+        } else {
+            message = error.localizedDescription
+            authFailure = false
+        }
+        if case .ready(let snapshot) = previous {
+            return .ready(snapshot)
+        }
+        if authFailure, !hasOpenCodeGoCredentials(id) {
+            return .signedOut(message)
+        }
+        return .failure(message)
+    }
+
+    private func refreshImplicitOpenCodeGo(userInitiated: Bool) async {
+        let current = states[.opencodeGo] ?? .idle
+        if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+            states[.opencodeGo] = .loading
+        }
+        do {
+            if settings.previewFixtures {
+                states[.opencodeGo] = .ready(try FixtureLoader.load(.opencodeGo, now: Date()))
+                return
+            }
+            let snapshot = try await OpenCodeGoClient.fetch(apiKey: nil)
+            states[.opencodeGo] = .ready(snapshot)
+        } catch {
+            if case .ready(let snapshot) = current {
+                states[.opencodeGo] = .ready(snapshot)
+            } else if let quota = error as? QuotaError, quota.isAuthFailure {
+                states[.opencodeGo] = .signedOut(quota.errorDescription ?? ProviderKind.opencodeGo.signInHint)
+            } else if let quota = error as? QuotaError {
+                states[.opencodeGo] = .failure(quota.errorDescription ?? "Something went wrong.")
+            } else {
+                states[.opencodeGo] = .failure(error.localizedDescription)
+            }
+        }
+    }
+
+    private func openCodeGoState(for id: UUID?) -> ProviderLoadState {
+        if settings.opencodeGoAccounts.isEmpty {
+            if settings.previewFixtures {
+                return states[.opencodeGo] ?? .idle
+            }
+            let implicit = states[.opencodeGo] ?? .idle
+            switch implicit {
+            case .idle:
+                return .signedOut(ProviderKind.opencodeGo.signInHint)
+            default:
+                return implicit
+            }
+        }
+        guard let id, settings.opencodeGoAccounts.contains(where: { $0.id == id }) else {
+            return .signedOut(ProviderKind.opencodeGo.signInHint)
+        }
+        return opencodeGoStates[id] ?? .idle
+    }
+
+    private func signedInOpenCodeGoAccountIDs() -> [UUID] {
+        visibleOpenCodeGoAccounts.compactMap { account in
+            isSignedInOpenCodeGo(account.id) ? account.id : nil
+        }
+    }
+
+    private func ensureActiveOpenCodeGoAccount() {
+        let before = settings.selectedOpenCodeGoAccountId
+        settings.resolveSelectedOpenCodeGoAccount(preferring: signedInOpenCodeGoAccountIDs())
+        if settings.selectedOpenCodeGoAccountId != before {
+            persistSettings()
+        }
+    }
+
+    private func recordOpenCodeGoEmail(_ email: String?, for id: UUID) {
+        let trimmed = CodexCLIAuth.usableEmail(email)
+        guard let trimmed else { return }
+        guard let index = settings.opencodeGoAccounts.firstIndex(where: { $0.id == id }) else { return }
+        guard settings.opencodeGoAccounts[index].email != trimmed else { return }
+        settings.opencodeGoAccounts[index].email = trimmed
+        persistSettings()
+    }
+}
+
+private struct OpenCodeGoFetchJob {
+    var id: UUID
+    var previous: ProviderLoadState
+    var apiKey: String?
+    var email: String?
+    var preview: Bool
+    var variant: Int
 }
 
 struct AccountCardRow: Identifiable, Equatable {

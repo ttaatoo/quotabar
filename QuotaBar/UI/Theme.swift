@@ -19,6 +19,7 @@ enum Theme {
     static let logoPurple = Color(red: 0.71, green: 0.42, blue: 1.0)
     static let logoGreen = Color(red: 0.24, green: 0.86, blue: 0.59)
     static let logoAmber = Color(red: 0.95, green: 0.62, blue: 0.22)
+    static let logoTeal = Color(red: 0.22, green: 0.78, blue: 0.82)
 
     /// Frozen compact chrome. Constant across every provider and account count.
     /// Tall enough for ~2 two-window cards or ~3 weekly-only cards; extras scroll.
@@ -91,6 +92,7 @@ enum Theme {
         case .chatgpt: return logoPurple
         case .glm: return logoGreen
         case .grok: return logoAmber
+        case .opencodeGo: return logoTeal
         }
     }
 }
