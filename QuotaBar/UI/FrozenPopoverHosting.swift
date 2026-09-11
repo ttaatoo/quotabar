@@ -4,6 +4,8 @@ import SwiftUI
 /// Menu-bar popover content controller. `fittingSize`, `intrinsicContentSize`,
 /// and `preferredContentSize` are pinned to `Theme.popoverChromeSize` so a
 /// provider switch cannot change the size NSPopover uses to re-anchor.
+/// Height is the Theme constant (tall enough for 2–3 ChatGPT cards); do not
+/// size to the SwiftUI tree.
 @MainActor
 final class FrozenPopoverController: NSViewController {
     private let hosting: FrozenPopoverHostingController

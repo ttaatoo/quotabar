@@ -18,6 +18,7 @@ enum ChatGPTClient {
         pastedJSON: String?,
         codexHomePath: String? = nil,
         allowAmbientCodex: Bool = false,
+        expectedEmail: String? = nil,
         now: Date = Date()
     ) async throws -> UsageSnapshot {
         let cookie = normalizeCookie(pasted)
@@ -40,24 +41,31 @@ enum ChatGPTClient {
         if let cookie {
             do {
                 let identity = try await fetchSession(cookie: cookie)
-                cookieIdentity = identity
-                do {
-                    if let snapshot = try await requestWhamUsage(
-                        accessToken: identity.accessToken,
-                        cookie: cookie,
-                        accountId: identity.accountId,
-                        email: identity.email,
-                        planName: identity.planName,
-                        now: now
-                    ) {
-                        return snapshot
-                    }
-                    gotJSONWithoutWindows = true
-                } catch let error as QuotaError where error.isAuthFailure {
+                if !identitiesMatch(identity.email, expectedEmail) {
                     cookieUnauthorized = true
-                    lastError = error
-                } catch {
-                    lastError = error
+                    lastError = QuotaError.schema(
+                        "Session cookie belongs to \(identity.email ?? "another account"), not \(expectedEmail ?? "this account")."
+                    )
+                } else {
+                    cookieIdentity = identity
+                    do {
+                        if let snapshot = try await requestWhamUsage(
+                            accessToken: identity.accessToken,
+                            cookie: cookie,
+                            accountId: identity.accountId,
+                            email: identity.email,
+                            planName: identity.planName,
+                            now: now
+                        ) {
+                            return try validatedSnapshot(snapshot, expectedEmail: expectedEmail)
+                        }
+                        gotJSONWithoutWindows = true
+                    } catch let error as QuotaError where error.isAuthFailure {
+                        cookieUnauthorized = true
+                        lastError = error
+                    } catch {
+                        lastError = error
+                    }
                 }
             } catch let error as QuotaError where error.isAuthFailure {
                 cookieUnauthorized = true
@@ -67,26 +75,32 @@ enum ChatGPTClient {
             }
         }
 
-        if scopedHome != nil, cookie == nil || cookieUnauthorized {
+        if scopedHome != nil, cookie == nil || cookieUnauthorized || cookieIdentity == nil {
             triedCodexAuth = true
             if let tokens = CodexCLIAuth.read(home: scopedHome) {
-                codexTokens = tokens
-                do {
-                    if let snapshot = try await requestWhamUsage(
-                        accessToken: tokens.accessToken,
-                        cookie: nil,
-                        accountId: tokens.accountId,
-                        email: tokens.email ?? cookieIdentity?.email,
-                        planName: tokens.planName ?? cookieIdentity?.planName,
-                        now: now
-                    ) {
-                        return snapshot
+                if !identitiesMatch(tokens.email, expectedEmail) {
+                    lastError = QuotaError.schema(
+                        "Codex auth.json belongs to \(tokens.email ?? "another account"), not \(expectedEmail ?? "this account")."
+                    )
+                } else {
+                    codexTokens = tokens
+                    do {
+                        if let snapshot = try await requestWhamUsage(
+                            accessToken: tokens.accessToken,
+                            cookie: nil,
+                            accountId: tokens.accountId,
+                            email: tokens.email ?? cookieIdentity?.email,
+                            planName: tokens.planName ?? cookieIdentity?.planName,
+                            now: now
+                        ) {
+                            return try validatedSnapshot(snapshot, expectedEmail: expectedEmail)
+                        }
+                        gotJSONWithoutWindows = true
+                    } catch let error as QuotaError where error.isAuthFailure {
+                        lastError = error
+                    } catch {
+                        lastError = error
                     }
-                    gotJSONWithoutWindows = true
-                } catch let error as QuotaError where error.isAuthFailure {
-                    lastError = error
-                } catch {
-                    lastError = error
                 }
             }
         }
@@ -110,7 +124,7 @@ enum ChatGPTClient {
                     planName: fallbackPlan,
                     now: now
                 ) {
-                    return snapshot
+                    return try validatedSnapshot(snapshot, expectedEmail: expectedEmail)
                 }
                 gotJSONWithoutWindows = true
             } catch {
@@ -119,7 +133,7 @@ enum ChatGPTClient {
         }
 
         if let pastedJSON, let snapshot = try? parsePastedOrOfficial(pastedJSON, fetchedAt: now, source: .pastedJSON) {
-            return snapshot
+            return try validatedSnapshot(snapshot, expectedEmail: expectedEmail)
         }
 
         if let lastError = lastError as? QuotaError, lastError.isAuthFailure, !gotJSONWithoutWindows {
@@ -128,7 +142,10 @@ enum ChatGPTClient {
 
         if cookie == nil && codexTokens == nil {
             if let pastedJSON {
-                return try parsePastedOrOfficial(pastedJSON, fetchedAt: now, source: .pastedJSON)
+                return try validatedSnapshot(
+                    try parsePastedOrOfficial(pastedJSON, fetchedAt: now, source: .pastedJSON),
+                    expectedEmail: expectedEmail
+                )
             }
             throw QuotaError.notSignedIn(
                 "Add a ChatGPT account in Settings (`codex login` in your default browser), or paste a session cookie / usage JSON under Advanced."
@@ -760,6 +777,27 @@ enum ChatGPTClient {
     }
 
     // MARK: - Identity helpers
+
+    /// When both sides have an email, they must be the same account.
+    /// Missing email on either side is not a mismatch (session payloads omit it).
+    static func identitiesMatch(_ lhs: String?, _ rhs: String?) -> Bool {
+        guard let left = CodexCLIAuth.usableEmail(lhs),
+              let right = CodexCLIAuth.usableEmail(rhs)
+        else { return true }
+        return left.caseInsensitiveCompare(right) == .orderedSame
+    }
+
+    private static func validatedSnapshot(
+        _ snapshot: UsageSnapshot,
+        expectedEmail: String?
+    ) throws -> UsageSnapshot {
+        guard identitiesMatch(snapshot.accountEmail, expectedEmail) else {
+            throw QuotaError.schema(
+                "Usage response was for \(snapshot.accountEmail ?? "another account"), not \(expectedEmail ?? "this account")."
+            )
+        }
+        return snapshot
+    }
 
     private static func accountId(fromSession object: [String: Any], accessToken: String) -> String? {
         if let account = object["account"] as? [String: Any],

@@ -3,6 +3,7 @@ import SwiftUI
 
 struct PopoverView: View {
     @ObservedObject var store: AppStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.popoverStackSpacing) {
@@ -67,25 +68,38 @@ struct PopoverView: View {
     private var cards: some View {
         let rows = cardRows
         return ScrollView(.vertical, showsIndicators: rows.count > 2) {
-            VStack(spacing: 6) {
+            VStack(spacing: Theme.accountCardListSpacing) {
                 ForEach(rows) { row in
                     AccountCard(
                         row: row,
                         mode: store.settings.displayMode,
                         now: store.now,
-                        onRetry: { Task { await store.refreshSelected() } },
+                        onRetry: { Task { await store.refreshCard(row.id) } },
                         onOpenSettings: store.openSettings,
                         isActive: store.selected == .chatgpt && store.isActiveChatGPTCard(row.id),
                         onActivate: store.selected == .chatgpt
                             ? { store.activateChatGPTCard(row.id) }
-                            : nil
+                            : nil,
+                        reduceMotion: reduceMotion
                     )
                 }
             }
             .frame(maxWidth: .infinity, alignment: .top)
+            .padding(.bottom, 2)
         }
         .scrollBounceBehavior(.basedOnSize)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .overlay(alignment: .bottom) {
+            if rows.count > 2 {
+                LinearGradient(
+                    colors: [Theme.background.opacity(0), Theme.background],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 14)
+                .allowsHitTesting(false)
+            }
+        }
         .clipped()
     }
 
@@ -97,7 +111,8 @@ struct PopoverView: View {
                     id: store.selected.rawValue,
                     email: nil,
                     fallbackTitle: "Not signed in",
-                    state: store.selectedState
+                    state: store.selectedState,
+                    hasCredentials: false
                 )
             ]
         }
@@ -108,13 +123,10 @@ struct PopoverView: View {
         VStack(spacing: Theme.footerStackSpacing) {
             Divider().overlay(Theme.hairline)
             HStack {
-                Button("Settings…") { store.openSettings() }
+                FooterTextButton(title: "Settings…", action: store.openSettings)
                 Spacer()
-                Button("Quit QuotaBar") { NSApp.terminate(nil) }
+                FooterTextButton(title: "Quit QuotaBar") { NSApp.terminate(nil) }
             }
-            .buttonStyle(.plain)
-            .font(.system(size: 11.5))
-            .foregroundStyle(Theme.secondary)
             .frame(height: Theme.footerButtonsHeight)
         }
     }
@@ -133,19 +145,25 @@ struct PopoverView: View {
             if case .ready(let snapshot) = row.state { return snapshot }
             return nil
         }
+        let updated: String
         if let newest = ready.max(by: { $0.fetchedAt < $1.fetchedAt }) {
-            return updatedText(from: newest)
+            updated = updatedText(from: newest)
+        } else {
+            switch store.selectedState {
+            case .ready(let snapshot):
+                updated = updatedText(from: snapshot)
+            case .loading, .idle:
+                updated = "Updating…"
+            case .signedOut:
+                updated = "Not signed in"
+            case .failure:
+                updated = "Update failed"
+            }
         }
-        switch store.selectedState {
-        case .ready(let snapshot):
-            return updatedText(from: snapshot)
-        case .loading, .idle:
-            return "Updating…"
-        case .signedOut:
-            return "Not signed in"
-        case .failure:
-            return "Update failed"
+        if store.selected == .chatgpt, rows.count > 1 {
+            return "\(rows.count) accounts · \(updated)"
         }
+        return updated
     }
 
     private func updatedText(from snapshot: UsageSnapshot) -> String {
@@ -165,6 +183,9 @@ struct AccountCard: View {
     let onOpenSettings: () -> Void
     var isActive: Bool = false
     var onActivate: (() -> Void)? = nil
+    var reduceMotion: Bool = false
+
+    @State private var hovering = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.accountCardSpacing) {
@@ -185,17 +206,11 @@ struct AccountCard: View {
                     .contentShape(Rectangle())
                     .onTapGesture { onActivate?() }
             case .signedOut(let message):
-                EmptyStateView(
-                    title: "Sign in",
-                    message: message,
-                    actionTitle: "Settings",
-                    action: onOpenSettings,
-                    onSelect: onActivate
-                )
+                signedOutBody(message)
             case .failure(let message):
                 EmptyStateView(
                     title: "Couldn’t load",
-                    message: message,
+                    message: shortFailure(message),
                     actionTitle: "Retry",
                     action: onRetry,
                     onSelect: onActivate
@@ -207,7 +222,7 @@ struct AccountCard: View {
         .fixedSize(horizontal: false, vertical: true)
         .background(
             RoundedRectangle(cornerRadius: Theme.accountCardRadius, style: .continuous)
-                .fill(Theme.elevated)
+                .fill(cardFill)
                 .contentShape(
                     RoundedRectangle(cornerRadius: Theme.accountCardRadius, style: .continuous)
                 )
@@ -217,35 +232,59 @@ struct AccountCard: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.accountCardRadius, style: .continuous)
-                .strokeBorder(
-                    isActive ? Theme.logoPurple.opacity(0.72) : Theme.hairline,
-                    lineWidth: 1
-                )
+                .strokeBorder(cardStroke, lineWidth: isActive ? 1.5 : 1)
         )
+        .onHover { hovering = $0 }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: isActive)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: hovering)
         .accessibilityAddTraits(isActive ? [.isSelected] : [])
         .accessibilityHint(onActivate == nil ? "" : "Show this account in the menu bar")
     }
 
+    private var cardFill: Color {
+        if isActive {
+            return Theme.logoPurple.opacity(0.10)
+        }
+        if hovering && onActivate != nil {
+            return Color(red: 0.19, green: 0.19, blue: 0.205)
+        }
+        return Theme.elevated
+    }
+
+    private var cardStroke: Color {
+        if isActive {
+            return Theme.logoPurple.opacity(0.78)
+        }
+        if hovering && onActivate != nil {
+            return Color.white.opacity(0.16)
+        }
+        return Theme.hairline
+    }
+
     private var headerRow: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
+        HStack(alignment: .center, spacing: 6) {
             Text(title)
                 .font(.system(size: 11.5, weight: .semibold))
                 .foregroundStyle(Theme.primary)
                 .lineLimit(1)
+                .truncationMode(.middle)
             Spacer(minLength: 6)
             if let plan = planName {
                 Text(plan)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Theme.secondary)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.planBadgeForeground(plan))
                     .padding(.horizontal, 6)
-                    .padding(.vertical, 1)
-                    .background(Capsule(style: .continuous).fill(Theme.badgeFill))
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule(style: .continuous).fill(Theme.planBadgeFill(plan))
+                    )
             }
             if isActive {
                 Image(systemName: "checkmark")
                     .font(.system(size: 8, weight: .bold))
                     .foregroundStyle(Theme.logoPurple)
-                    .frame(width: 8, height: 11)
+                    .frame(width: 14, height: 14)
+                    .background(Circle().fill(Theme.logoPurple.opacity(0.18)))
                     .accessibilityHidden(true)
             }
         }
@@ -272,6 +311,27 @@ struct AccountCard: View {
         }
     }
 
+    @ViewBuilder
+    private func signedOutBody(_ message: String) -> some View {
+        if row.hasCredentials || hasKnownEmail {
+            EmptyStateView(
+                title: "Couldn’t refresh",
+                message: "This account is still saved. Retry, or re-add it in Settings if the session expired.",
+                actionTitle: "Retry",
+                action: onRetry,
+                onSelect: onActivate
+            )
+        } else {
+            EmptyStateView(
+                title: "Not signed in",
+                message: shortFailure(message),
+                actionTitle: "Settings",
+                action: onOpenSettings,
+                onSelect: onActivate
+            )
+        }
+    }
+
     private var title: String {
         if let email = row.email, !email.isEmpty {
             return email
@@ -279,7 +339,7 @@ struct AccountCard: View {
         if case .ready(let snapshot) = row.state, let email = snapshot.accountEmail, !email.isEmpty {
             return email
         }
-        if case .signedOut = row.state {
+        if case .signedOut = row.state, !hasKnownEmail, !row.hasCredentials {
             return "Not signed in"
         }
         if case .failure = row.state {
@@ -293,6 +353,31 @@ struct AccountCard: View {
             return snapshot.planName
         }
         return nil
+    }
+
+    private var hasKnownEmail: Bool {
+        if let email = row.email, !email.isEmpty { return true }
+        return false
+    }
+
+    private func shortFailure(_ message: String) -> String {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count <= 140 { return trimmed }
+        return String(trimmed.prefix(137)) + "…"
+    }
+}
+
+private struct FooterTextButton: View {
+    let title: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(title, action: action)
+            .buttonStyle(.plain)
+            .font(.system(size: 11.5))
+            .foregroundStyle(hovering ? Theme.primary : Theme.secondary)
+            .onHover { hovering = $0 }
     }
 }
 

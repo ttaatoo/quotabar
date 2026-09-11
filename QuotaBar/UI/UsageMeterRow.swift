@@ -30,14 +30,14 @@ struct UsageMeterRow: View {
         let titleSize: CGFloat = compact ? 11 : 13
         let footerSize: CGFloat = compact ? 9.5 : 10.5
 
-        VStack(alignment: .leading, spacing: compact ? 1 : 6) {
+        VStack(alignment: .leading, spacing: compact ? 2 : 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text(title)
                     .font(.system(size: titleSize, weight: .medium))
                     .foregroundStyle(active ? Theme.primary : Theme.secondary)
                 Spacer()
                 Text(active ? valueText : "—")
-                    .font(.system(size: titleSize, weight: .semibold))
+                    .font(.system(size: titleSize, weight: .semibold).monospacedDigit())
                     .foregroundStyle(valueColor(active: active, low: low))
             }
 
@@ -47,12 +47,12 @@ struct UsageMeterRow: View {
                         .fill(Theme.track)
                     if active, fill > 0 {
                         Capsule()
-                            .fill(low ? Theme.warning : Color.white)
+                            .fill(low ? Theme.warning : Color.white.opacity(0.92))
                             .frame(width: max(2, geo.size.width * fill))
                     }
                 }
             }
-            .frame(height: compact ? 2.5 : 3)
+            .frame(height: compact ? 3 : 3.5)
 
             HStack(spacing: 4) {
                 Image(systemName: "clock")
