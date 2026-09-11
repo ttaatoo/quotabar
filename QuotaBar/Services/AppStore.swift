@@ -168,14 +168,8 @@ final class AppStore: ObservableObject {
     }
 
     private func isSignedInChatGPT(_ id: UUID) -> Bool {
-        switch chatgptStates[id] {
-        case .ready:
-            return true
-        case .failure, .loading:
-            return hasChatGPTCredentials(id)
-        default:
-            return false
-        }
+        if case .ready = chatgptStates[id] { return true }
+        return false
     }
 
     /// Cookie, pasted JSON, or a readable `auth.json` for this account.
