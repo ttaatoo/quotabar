@@ -164,7 +164,7 @@ enum ChatGPTClient {
                 )
             }
             throw QuotaError.notSignedIn(
-                "Add a ChatGPT account in Settings (`codex login` in your default browser), or paste a session cookie / usage JSON under Advanced."
+                "Add a ChatGPT account in Settings to sign in with Codex in your browser."
             )
         }
 

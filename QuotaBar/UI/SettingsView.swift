@@ -210,7 +210,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 16) {
             SettingsPaneHeader(
                 title: SettingsSection.chatgpt.paneTitle,
-                subtitle: "Add account runs `codex login` in your default browser. Extra accounts use a private Codex home so ~/.codex/auth.json is not overwritten."
+                subtitle: "Add account and Re-login run Codex in your default browser. Extra accounts use a private Codex home so ~/.codex/auth.json is not overwritten."
             ) {
                 if !store.settings.chatgptAccounts.isEmpty {
                     SettingsSecondaryButton(title: "Add account", systemImage: "plus") {
@@ -225,10 +225,22 @@ struct SettingsView: View {
                         provider: .chatgpt,
                         symbol: ProviderKind.chatgpt.settingsSymbol,
                         title: "No ChatGPT accounts",
-                        message: "Add an account to sign in with Codex in your browser, or paste a session cookie under Advanced after you add one.",
-                        actionTitle: "Add account"
+                        message: "QuotaBar opens Codex in your browser so you can sign in.",
+                        actionTitle: "Sign in with browser (Codex)",
+                        actionSystemImage: "globe"
                     ) {
                         CodexLoginPresenter.shared.begin(store: store)
+                    }
+                    SettingsInsetHairline()
+                    SettingsAdvancedDisclosure(title: "Advanced") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            SettingsCaption(text: "Cookie and usage JSON are an optional fallback when Codex login is not available or failed.")
+                            SettingsSecondaryButton(title: "Add with session cookie", systemImage: "plus") {
+                                addChatGPTCookieAccount()
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 10)
                     }
                 }
             } else {
@@ -240,6 +252,7 @@ struct SettingsView: View {
                         chatgptAccountRow(account)
                     }
                 }
+                SettingsCaption(text: "Add account and Re-login open Codex in the browser.")
             }
         }
     }
@@ -328,7 +341,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 16) {
             SettingsPaneHeader(
                 title: SettingsSection.grok.paneTitle,
-                subtitle: "Add account imports ~/.grok/auth.json when it is unused, or adds a SuperGrok bearer row. QuotaBar never writes or refreshes that file."
+                subtitle: "Add account and Re-login run grok login --oauth in your default browser. Extra accounts use a private Grok home so ~/.grok/auth.json is not overwritten."
             ) {
                 HStack(spacing: 8) {
                     if store.canImportAmbientGrok, !store.settings.grokAccounts.isEmpty {
@@ -338,7 +351,7 @@ struct SettingsView: View {
                     }
                     if !store.settings.grokAccounts.isEmpty {
                         SettingsSecondaryButton(title: "Add account", systemImage: "plus") {
-                            addGrokAccount()
+                            GrokLoginPresenter.shared.begin(store: store)
                         }
                     }
                 }
@@ -350,10 +363,22 @@ struct SettingsView: View {
                         provider: .grok,
                         symbol: ProviderKind.grok.settingsSymbol,
                         title: "No Grok accounts",
-                        message: "Add an account to import `grok login` or paste a SuperGrok bearer. GROK_OAUTH_TOKEN is used when no accounts exist yet.",
-                        actionTitle: "Add account"
+                        message: "QuotaBar opens the Grok CLI in your browser so you can sign in.",
+                        actionTitle: "Sign in with browser (Grok)",
+                        actionSystemImage: "globe"
                     ) {
-                        addGrokAccountFromEmpty()
+                        GrokLoginPresenter.shared.begin(store: store)
+                    }
+                    SettingsInsetHairline()
+                    SettingsAdvancedDisclosure(title: "Advanced") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            SettingsCaption(text: "SuperGrok bearer is an optional fallback when Grok CLI login is not available or failed. QuotaBar stores it in the Keychain.")
+                            SettingsSecondaryButton(title: "Add with SuperGrok bearer", systemImage: "plus") {
+                                addGrokAccountFromEmpty()
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 10)
                     }
                 }
             } else {
@@ -365,7 +390,7 @@ struct SettingsView: View {
                         grokAccountRow(account)
                     }
                 }
-                SettingsCaption(text: "Deleting a row removes its Keychain bearer. ~/.grok/auth.json is never deleted.")
+                SettingsCaption(text: "Add account and Re-login open the Grok CLI in the browser. ~/.grok/auth.json is never deleted.")
             }
         }
     }
@@ -499,7 +524,7 @@ struct SettingsView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                SettingsIconButton(systemName: "arrow.clockwise", help: "Re-login") {
+                SettingsSecondaryButton(title: "Re-login", systemImage: "arrow.clockwise") {
                     CodexLoginPresenter.shared.beginRelogin(store: store, accountId: account.id)
                 }
                 SettingsIconButton(systemName: "pencil", help: "Rename") {
@@ -516,8 +541,9 @@ struct SettingsView: View {
             .padding(.top, 10)
             .padding(.bottom, 6)
 
-            SettingsAdvancedDisclosure(title: "Advanced: cookie / JSON") {
+            SettingsAdvancedDisclosure(title: "Advanced") {
                 VStack(alignment: .leading, spacing: 8) {
+                    SettingsCaption(text: "Cookie and usage JSON are an optional fallback when Codex login is not available or failed.")
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Session cookie")
                             .font(.system(size: 11, weight: .medium))
@@ -642,7 +668,7 @@ struct SettingsView: View {
     }
 
     private func grokAccountRow(_ account: GrokAccount) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 10) {
                 SettingsProviderWell(provider: .grok, size: 22, iconSize: 13)
                 VStack(alignment: .leading, spacing: 2) {
@@ -656,6 +682,9 @@ struct SettingsView: View {
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                SettingsSecondaryButton(title: "Re-login", systemImage: "arrow.clockwise") {
+                    GrokLoginPresenter.shared.beginRelogin(store: store, accountId: account.id)
+                }
                 SettingsIconButton(systemName: "pencil", help: "Rename") {
                     renameKind = .grok
                     renameID = account.id
@@ -666,27 +695,36 @@ struct SettingsView: View {
                     deleteID = account.id
                 }
             }
-            VStack(alignment: .leading, spacing: 6) {
-                Text("SuperGrok bearer (optional)")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Theme.settingsSecondary)
-                SettingsSecretField(
-                    placeholder: "SuperGrok bearer",
-                    text: grokTokenBinding(account.id),
-                    warning: grokTokenRejected(account.id),
-                    focusID: "grok.token.\(account.id.uuidString)",
-                    focusedField: $focusedField
-                )
-            }
-            if grokTokenRejected(account.id) {
-                SettingsCaption(
-                    text: "Rejected: paste a SuperGrok bearer, not an xai- management key or cookie.",
-                    tone: .warning
-                )
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
+
+            SettingsAdvancedDisclosure(title: "Advanced") {
+                VStack(alignment: .leading, spacing: 8) {
+                    SettingsCaption(text: "SuperGrok bearer is an optional fallback when Grok CLI login is not available or failed.")
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("SuperGrok bearer")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Theme.settingsSecondary)
+                        SettingsSecretField(
+                            placeholder: "SuperGrok bearer",
+                            text: grokTokenBinding(account.id),
+                            warning: grokTokenRejected(account.id),
+                            focusID: "grok.token.\(account.id.uuidString)",
+                            focusedField: $focusedField
+                        )
+                    }
+                    if grokTokenRejected(account.id) {
+                        SettingsCaption(
+                            text: "Rejected: paste a SuperGrok bearer, not an xai- management key or cookie.",
+                            tone: .warning
+                        )
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 4)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
     }
 
     private func statusRow(title: String, subtitle: String) -> some View {
@@ -730,7 +768,7 @@ struct SettingsView: View {
     }
 
     private func grokAccountSubtitle(_ account: GrokAccount) -> String {
-        if account.usesAmbientAuthFile {
+        if account.usesAmbientAuthFile || GrokAuth.isAmbientHomePath(account.grokHomePath) {
             if let email = account.email,
                !email.isEmpty,
                account.label.caseInsensitiveCompare(email) != .orderedSame {
@@ -738,12 +776,20 @@ struct SettingsView: View {
             }
             return "Uses ~/.grok/auth.json"
         }
+        if let path = account.grokHomePath, !path.isEmpty {
+            if let email = account.email,
+               !email.isEmpty,
+               account.label.caseInsensitiveCompare(email) != .orderedSame {
+                return "\(account.label) · private Grok home"
+            }
+            return "Private Grok home"
+        }
         if let email = account.email,
            !email.isEmpty,
            account.label.caseInsensitiveCompare(email) != .orderedSame {
             return account.label
         }
-        return "Optional bearer if `grok login` is not this account"
+        return "Sign in with browser, or paste a bearer under Advanced"
     }
 
     private func grokTokenRejected(_ id: UUID) -> Bool {
@@ -767,7 +813,7 @@ struct SettingsView: View {
         case .opencodeGo:
             return "The Keychain API key for this OpenCode account is removed. Other accounts stay."
         case .grok:
-            return "The Keychain bearer for this account is removed. ~/.grok/auth.json is never deleted."
+            return "The Keychain bearer for this account is removed. A private Grok home is deleted when it belongs to QuotaBar; ~/.grok/auth.json is never deleted."
         }
     }
 
@@ -798,13 +844,13 @@ struct SettingsView: View {
         focusedField = "opencode.key.\(id.uuidString)"
     }
 
-    private func addGrokAccount() {
-        let id = store.addGrokAccount()
-        focusedField = "grok.token.\(id.uuidString)"
+    private func addChatGPTCookieAccount() {
+        let id = store.addChatGPTAccount()
+        focusedField = "chatgpt.cookie.\(id.uuidString)"
     }
 
     private func addGrokAccountFromEmpty() {
-        let id = store.addGrokAccountOrImportAmbient()
+        let id = store.addGrokAccount()
         focusedField = "grok.token.\(id.uuidString)"
     }
 

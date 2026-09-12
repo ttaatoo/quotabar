@@ -1439,7 +1439,9 @@ extension AppStore {
     }
 
     var hasAmbientGrokAccount: Bool {
-        settings.grokAccounts.contains { $0.usesAmbientAuthFile }
+        settings.grokAccounts.contains { account in
+            account.usesAmbientAuthFile || GrokAuth.isAmbientHomePath(account.grokHomePath)
+        }
     }
 
     var canImportAmbientGrok: Bool {
@@ -1454,6 +1456,11 @@ extension AppStore {
     func hasGrokCredentials(_ id: UUID) -> Bool {
         if emptyToNil(grokTokens[id, default: ""]) != nil { return true }
         let account = settings.grokAccounts.first(where: { $0.id == id })
+        if let path = account?.grokHomePath,
+           let home = GrokAuth.homeURL(path: path),
+           GrokAuth.loadAuthFile(home: home) != nil {
+            return true
+        }
         if account?.usesAmbientAuthFile == true, GrokAuth.loadAuthFile() != nil {
             return true
         }
@@ -1509,15 +1516,83 @@ extension AppStore {
     }
 
     func deleteGrokAccount(_ id: UUID) {
+        let homePath = settings.grokAccounts.first(where: { $0.id == id })?.grokHomePath
+        let ambient = settings.grokAccounts.first(where: { $0.id == id })?.usesAmbientAuthFile ?? false
         settings.grokAccounts.removeAll { $0.id == id }
         grokTokens[id] = nil
         grokStates[id] = nil
         KeychainStore.delete(.grokAccountOAuthToken(id))
+        if !ambient {
+            GrokAuth.removeManagedHomeIfSafe(homePath)
+        }
         if settings.selectedGrokAccountId == id {
             settings.selectedGrokAccountId = nil
             settings.resolveSelectedGrokAccount(preferring: signedInGrokAccountIDs())
         }
         persistSettings()
+    }
+
+    func applyGrokRelogin(
+        accountId: UUID,
+        homePath: String,
+        email: String?,
+        ambient: Bool
+    ) {
+        guard let index = settings.grokAccounts.firstIndex(where: { $0.id == accountId }) else { return }
+        let previousHome = settings.grokAccounts[index].grokHomePath
+        let standardizedHome = GrokAuth.homeURL(path: homePath)?.path(percentEncoded: false) ?? homePath
+        settings.grokAccounts[index].grokHomePath = standardizedHome
+        settings.grokAccounts[index].usesAmbientAuthFile = ambient
+        if let trimmed = AccountIdentity.usableHandle(email) {
+            settings.grokAccounts[index].email = trimmed
+        }
+        if previousHome != standardizedHome {
+            GrokAuth.removeManagedHomeIfSafe(previousHome)
+        }
+        settings.selectedGrokAccountId = accountId
+        persistSettings()
+        Task { await refreshGrokAccount(accountId, userInitiated: true) }
+    }
+
+    @discardableResult
+    func upsertGrokAccountFromHome(
+        homePath: String,
+        email: String?,
+        ambient: Bool
+    ) -> UUID? {
+        let trimmedEmail = AccountIdentity.usableHandle(email)
+        let standardizedHome = GrokAuth.homeURL(path: homePath)?.path(percentEncoded: false) ?? homePath
+
+        if let trimmedEmail,
+           let existing = settings.grokAccounts.first(where: {
+               $0.email?.caseInsensitiveCompare(trimmedEmail) == .orderedSame
+           }) {
+            if let index = settings.grokAccounts.firstIndex(where: { $0.id == existing.id }) {
+                let previousHome = settings.grokAccounts[index].grokHomePath
+                settings.grokAccounts[index].email = trimmedEmail
+                settings.grokAccounts[index].grokHomePath = standardizedHome
+                settings.grokAccounts[index].usesAmbientAuthFile = ambient
+                if previousHome != standardizedHome {
+                    GrokAuth.removeManagedHomeIfSafe(previousHome)
+                }
+            }
+            settings.selectedGrokAccountId = existing.id
+            persistSettings()
+            Task { await refreshGrokAccount(existing.id, userInitiated: true) }
+            return existing.id
+        }
+
+        let label = trimmedEmail ?? nextGrokLabel()
+        let id = addGrokAccount(label: label)
+        if let index = settings.grokAccounts.firstIndex(where: { $0.id == id }) {
+            settings.grokAccounts[index].email = trimmedEmail
+            settings.grokAccounts[index].grokHomePath = standardizedHome
+            settings.grokAccounts[index].usesAmbientAuthFile = ambient
+        }
+        settings.selectedGrokAccountId = id
+        persistSettings()
+        Task { await refreshGrokAccount(id, userInitiated: true) }
+        return id
     }
 
     func setGrokOAuthToken(_ value: String, for id: UUID) {
@@ -1530,6 +1605,7 @@ extension AppStore {
         if hasAmbientGrokAccount { return nil }
         guard let creds = GrokAuth.loadAuthFile() else { return nil }
         let email = creds.email ?? AccountIdentity.fromToken(creds.accessToken)
+        let ambientPath = GrokAuth.defaultHomeURL().path(percentEncoded: false)
         if let email,
            let existing = settings.grokAccounts.first(where: {
                $0.email?.caseInsensitiveCompare(email) == .orderedSame
@@ -1537,6 +1613,7 @@ extension AppStore {
             if let index = settings.grokAccounts.firstIndex(where: { $0.id == existing.id }) {
                 settings.grokAccounts[index].email = email
                 settings.grokAccounts[index].usesAmbientAuthFile = true
+                settings.grokAccounts[index].grokHomePath = ambientPath
             }
             settings.selectedGrokAccountId = existing.id
             persistSettings()
@@ -1548,6 +1625,7 @@ extension AppStore {
         if let index = settings.grokAccounts.firstIndex(where: { $0.id == id }) {
             settings.grokAccounts[index].email = email
             settings.grokAccounts[index].usesAmbientAuthFile = true
+            settings.grokAccounts[index].grokHomePath = ambientPath
         }
         settings.selectedGrokAccountId = id
         persistSettings()
@@ -1609,6 +1687,7 @@ extension AppStore {
             pastedToken: emptyToNil(grokTokens[account.id, default: ""]),
             useAmbientFile: account.usesAmbientAuthFile,
             allowEnvironment: false,
+            grokHomePath: account.grokHomePath,
             email: account.email,
             preview: settings.previewFixtures,
             variant: variant

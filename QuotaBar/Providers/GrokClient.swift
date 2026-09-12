@@ -10,12 +10,14 @@ enum GrokClient {
         pastedToken: String?,
         useAmbientFile: Bool = true,
         allowEnvironment: Bool = true,
+        grokHomePath: String? = nil,
         now: Date = Date()
     ) async throws -> UsageSnapshot {
         let credentials = try GrokAuth.resolve(
             pasted: pastedToken,
             useAmbientFile: useAmbientFile,
-            allowEnvironment: allowEnvironment
+            allowEnvironment: allowEnvironment,
+            grokHomePath: grokHomePath
         )
         let headers = proxyHeaders(token: credentials.accessToken)
 

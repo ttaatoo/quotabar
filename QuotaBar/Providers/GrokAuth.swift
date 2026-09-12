@@ -1,7 +1,9 @@
 import Foundation
 
 /// Read-only SuperGrok / Grok CLI credentials. QuotaBar never writes or refreshes
-/// `~/.grok/auth.json` (or `$GROK_HOME/auth.json`).
+/// `~/.grok/auth.json` (or `$GROK_HOME/auth.json`). Extra accounts isolate login
+/// by setting `GROK_HOME` to a private Application Support home; xAI documents
+/// that variable as the home for auth.
 enum GrokAuth {
     struct Credentials: Equatable {
         var accessToken: String
@@ -47,31 +49,88 @@ enum GrokAuth {
     static let legacySessionScope = "https://accounts.x.ai/sign-in"
 
     static let signInHint =
-        "Add a Grok account in Settings. Run `grok login` (writes ~/.grok/auth.json) or paste a SuperGrok bearer."
+        "Add a Grok account in Settings to sign in with the Grok CLI in your browser."
 
     static func grokHomeURL(env: [String: String] = ProcessInfo.processInfo.environment) -> URL {
+        defaultHomeURL(env: env)
+    }
+
+    static func defaultHomeURL(env: [String: String] = ProcessInfo.processInfo.environment) -> URL {
         let custom = env["GROK_HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !custom.isEmpty {
-            return URL(fileURLWithPath: (custom as NSString).expandingTildeInPath, isDirectory: true)
+            return expandedDirectory(custom)
         }
         return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".grok", isDirectory: true)
     }
 
-    static func authFileURL(env: [String: String] = ProcessInfo.processInfo.environment) -> URL {
-        grokHomeURL(env: env).appendingPathComponent("auth.json")
+    static func homeURL(path: String?) -> URL? {
+        guard let path = path?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty else {
+            return nil
+        }
+        return expandedDirectory(path)
+    }
+
+    static func authFileURL(home: URL? = nil, env: [String: String] = ProcessInfo.processInfo.environment) -> URL {
+        (home ?? defaultHomeURL(env: env)).appendingPathComponent("auth.json")
+    }
+
+    static func isAmbientHome(_ url: URL) -> Bool {
+        standardizedPath(url) == standardizedPath(defaultHomeURL())
+    }
+
+    static func isAmbientHomePath(_ path: String?) -> Bool {
+        guard let url = homeURL(path: path) else { return false }
+        return isAmbientHome(url)
+    }
+
+    static func managedHomesRoot() -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Application Support", isDirectory: true)
+        return base
+            .appendingPathComponent("QuotaBar", isDirectory: true)
+            .appendingPathComponent("managed-grok-homes", isDirectory: true)
+    }
+
+    static func makeManagedHomeURL() -> URL {
+        managedHomesRoot().appendingPathComponent(UUID().uuidString, isDirectory: true)
+    }
+
+    static func isManagedHome(_ url: URL) -> Bool {
+        let root = standardizedPath(managedHomesRoot())
+        let target = standardizedPath(url)
+        let prefix = root.hasSuffix("/") ? root : root + "/"
+        return target.hasPrefix(prefix) && target != root
+    }
+
+    static func removeManagedHomeIfSafe(_ path: String?) {
+        guard let home = homeURL(path: path), isManagedHome(home) else { return }
+        let filePath = home.path(percentEncoded: false)
+        guard FileManager.default.fileExists(atPath: filePath) else { return }
+        try? FileManager.default.removeItem(at: home)
     }
 
     /// Prefer a non-expired `auth.json` when allowed, then a pasted SuperGrok bearer,
     /// then `GROK_OAUTH_TOKEN` when allowed. Expired or missing files are not sent.
     /// QuotaBar never refreshes tokens.
+    ///
+    /// When `grokHomePath` is set, that home is read first and ambient `~/.grok`
+    /// is not used unless the path is the ambient home.
     static func resolve(
         pasted: String?,
         useAmbientFile: Bool = true,
         allowEnvironment: Bool = true,
+        grokHomePath: String? = nil,
         env: [String: String] = ProcessInfo.processInfo.environment
     ) throws -> Credentials {
-        if useAmbientFile, let file = loadAuthFile(env: env), !file.isExpired {
+        let scopedHome = homeURL(path: grokHomePath)
+        let readAmbient = useAmbientFile && scopedHome == nil
+        let fileHome = scopedHome
+        if let fileHome, let file = loadAuthFile(home: fileHome), !file.isExpired {
+            return file
+        }
+        if readAmbient, let file = loadAuthFile(env: env), !file.isExpired {
             return file
         }
 
@@ -87,7 +146,15 @@ enum GrokAuth {
             )
         }
 
-        if allowEnvironment, let token = normalizedOAuthToken(env["GROK_OAUTH_TOKEN"]) {
+        let allowEnvToken: Bool
+        if !allowEnvironment {
+            allowEnvToken = false
+        } else if let scopedHome {
+            allowEnvToken = isAmbientHome(scopedHome)
+        } else {
+            allowEnvToken = true
+        }
+        if allowEnvToken, let token = normalizedOAuthToken(env["GROK_OAUTH_TOKEN"]) {
             return Credentials(
                 accessToken: token,
                 email: AccountIdentity.fromToken(token),
@@ -99,30 +166,48 @@ enum GrokAuth {
             )
         }
 
-        if useAmbientFile, let file = loadAuthFile(env: env), file.isExpired {
-            throw QuotaError.notSignedIn("Grok token expired. Run `grok login` again, or paste a SuperGrok bearer in Settings.")
+        if let fileHome, let file = loadAuthFile(home: fileHome), file.isExpired {
+            throw QuotaError.notSignedIn("Grok token expired. Re-login this account in Settings.")
+        }
+        if readAmbient, let file = loadAuthFile(env: env), file.isExpired {
+            throw QuotaError.notSignedIn("Grok token expired. Re-login this account in Settings.")
         }
 
         if let pasted, !pasted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
            normalizedOAuthToken(pasted) == nil {
             throw QuotaError.notSignedIn(
-                "That value is not a SuperGrok bearer. Run `grok login`, or paste a bearer — not an xai- management key or cookie."
+                "That value is not a SuperGrok bearer. Sign in with the Grok CLI, or paste a bearer, not an xai- management key or cookie."
             )
         }
 
+        if scopedHome != nil {
+            throw QuotaError.notSignedIn("No readable auth.json in this account’s Grok home. Re-login, or paste a SuperGrok bearer under Advanced.")
+        }
         if !useAmbientFile {
-            throw QuotaError.notSignedIn("Paste a SuperGrok bearer for this account in Settings.")
+            throw QuotaError.notSignedIn("Sign in with the Grok CLI, or paste a SuperGrok bearer under Advanced.")
         }
         throw QuotaError.notSignedIn(signInHint)
     }
 
-    static func loadAuthFile(env: [String: String] = ProcessInfo.processInfo.environment) -> Credentials? {
-        let url = authFileURL(env: env)
-        let path = url.path
+    static func loadAuthFile(
+        home: URL? = nil,
+        env: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Credentials? {
+        let url = authFileURL(home: home, env: env)
+        let path = url.path(percentEncoded: false)
         guard FileManager.default.fileExists(atPath: path),
               let data = try? Data(contentsOf: url)
         else { return nil }
         return parseAuthFile(data)
+    }
+
+    private static func expandedDirectory(_ path: String) -> URL {
+        let expanded = (path as NSString).expandingTildeInPath
+        return URL(fileURLWithPath: expanded, isDirectory: true)
+    }
+
+    private static func standardizedPath(_ url: URL) -> String {
+        url.standardizedFileURL.path(percentEncoded: false)
     }
 
     static func parseAuthFile(_ data: Data) -> Credentials? {

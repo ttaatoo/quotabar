@@ -186,6 +186,7 @@ enum ConfigStore {
         settings.grokAccounts.contains { account in
             KeychainStore.get(.grokAccountOAuthToken(account.id)) != nil
                 || account.usesAmbientAuthFile
+                || !(account.grokHomePath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
         }
     }
 }

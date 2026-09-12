@@ -110,23 +110,28 @@ struct GrokAccount: Equatable, Codable, Identifiable, Hashable {
     var email: String?
     /// Reads `~/.grok/auth.json` (or `$GROK_HOME/auth.json`). Never written by QuotaBar.
     var usesAmbientAuthFile: Bool
+    /// Private or pinned Grok home. Extra accounts use Application Support
+    /// `managed-grok-homes/<uuid>` so ambient auth.json is not overwritten.
+    var grokHomePath: String?
 
     init(
         id: UUID = UUID(),
         label: String,
         enabled: Bool = true,
         email: String? = nil,
-        usesAmbientAuthFile: Bool = false
+        usesAmbientAuthFile: Bool = false,
+        grokHomePath: String? = nil
     ) {
         self.id = id
         self.label = label
         self.enabled = enabled
         self.email = email
         self.usesAmbientAuthFile = usesAmbientAuthFile
+        self.grokHomePath = grokHomePath
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, label, enabled, email, usesAmbientAuthFile
+        case id, label, enabled, email, usesAmbientAuthFile, grokHomePath
     }
 
     init(from decoder: Decoder) throws {
@@ -136,6 +141,7 @@ struct GrokAccount: Equatable, Codable, Identifiable, Hashable {
         enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         email = try container.decodeIfPresent(String.self, forKey: .email)
         usesAmbientAuthFile = try container.decodeIfPresent(Bool.self, forKey: .usesAmbientAuthFile) ?? false
+        grokHomePath = try container.decodeIfPresent(String.self, forKey: .grokHomePath)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -145,6 +151,7 @@ struct GrokAccount: Equatable, Codable, Identifiable, Hashable {
         try container.encode(enabled, forKey: .enabled)
         try container.encodeIfPresent(email, forKey: .email)
         try container.encode(usesAmbientAuthFile, forKey: .usesAmbientAuthFile)
+        try container.encodeIfPresent(grokHomePath, forKey: .grokHomePath)
     }
 
     var displayTitle: String {
@@ -291,6 +298,9 @@ struct AppSettings: Equatable, Codable {
             }
             if let email = grokAccounts[index].email?.trimmingCharacters(in: .whitespacesAndNewlines), email.isEmpty {
                 grokAccounts[index].email = nil
+            }
+            if let home = grokAccounts[index].grokHomePath?.trimmingCharacters(in: .whitespacesAndNewlines) {
+                grokAccounts[index].grokHomePath = home.isEmpty ? nil : home
             }
         }
 

@@ -512,6 +512,7 @@ struct SettingsEmptyState: View {
     let title: String
     let message: String
     let actionTitle: String
+    var actionSystemImage: String = "plus"
     let action: () -> Void
 
     var body: some View {
@@ -541,7 +542,7 @@ struct SettingsEmptyState: View {
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            SettingsPrimaryButton(title: actionTitle, systemImage: "plus", compact: true, action: action)
+            SettingsPrimaryButton(title: actionTitle, systemImage: actionSystemImage, compact: true, action: action)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 22)

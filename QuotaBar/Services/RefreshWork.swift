@@ -196,7 +196,8 @@ enum RefreshWork {
         return try await GrokClient.fetch(
             pastedToken: job.pastedToken,
             useAmbientFile: job.useAmbientFile,
-            allowEnvironment: job.allowEnvironment
+            allowEnvironment: job.allowEnvironment,
+            grokHomePath: job.grokHomePath
         )
     }
 
@@ -242,6 +243,7 @@ struct GrokFetchJob: Sendable {
     var pastedToken: String?
     var useAmbientFile: Bool
     var allowEnvironment: Bool
+    var grokHomePath: String? = nil
     var email: String?
     var preview: Bool
     var variant: Int
