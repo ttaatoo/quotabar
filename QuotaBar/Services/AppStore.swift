@@ -9,6 +9,7 @@ final class AppStore: ObservableObject {
     @Published var states: [ProviderKind: ProviderLoadState]
     @Published var chatgptStates: [UUID: ProviderLoadState] = [:]
     @Published var opencodeGoStates: [UUID: ProviderLoadState] = [:]
+    @Published var grokStates: [UUID: ProviderLoadState] = [:]
     @Published var now: Date = Date()
     @Published var isRefreshing = false
 
@@ -16,8 +17,8 @@ final class AppStore: ObservableObject {
     @Published var chatgptCookies: [UUID: String] = [:]
     @Published var chatgptJSONs: [UUID: String] = [:]
     @Published var glmAPIKey: String = ""
-    @Published var grokOAuthToken: String = ""
     @Published var opencodeGoAPIKeys: [UUID: String] = [:]
+    @Published var grokTokens: [UUID: String] = [:]
 
     private var pollTimer: Timer?
     private var clockTimer: Timer?
@@ -29,9 +30,9 @@ final class AppStore: ObservableObject {
         states = Dictionary(uniqueKeysWithValues: ProviderKind.allCases.map { ($0, .idle) })
         cursorCookie = KeychainStore.get(.cursorCookie) ?? ""
         glmAPIKey = KeychainStore.get(.glmAPIKey) ?? ""
-        grokOAuthToken = KeychainStore.get(.grokOAuthToken) ?? ""
         loadChatGPTSecrets()
         loadOpenCodeGoSecrets()
+        loadGrokSecrets()
     }
 
     var selected: ProviderKind { settings.selectedProvider }
@@ -47,6 +48,9 @@ final class AppStore: ObservableObject {
         if selected == .opencodeGo {
             return activeOpenCodeGoState
         }
+        if selected == .grok {
+            return activeGrokState
+        }
         return states[selected] ?? .idle
     }
 
@@ -58,6 +62,8 @@ final class AppStore: ObservableObject {
             return isActiveChatGPTCard(cardID)
         case .opencodeGo:
             return isActiveOpenCodeGoCard(cardID)
+        case .grok:
+            return isActiveGrokCard(cardID)
         default:
             return false
         }
@@ -69,6 +75,8 @@ final class AppStore: ObservableObject {
             activateChatGPTCard(cardID)
         case .opencodeGo:
             activateOpenCodeGoCard(cardID)
+        case .grok:
+            activateGrokCard(cardID)
         default:
             break
         }
@@ -94,11 +102,20 @@ final class AppStore: ObservableObject {
     }
 
     var grokEmail: String? {
-        states[.grok]?.snapshot?.accountEmail
+        if let id = activeGrokAccountId {
+            return settings.grokAccounts.first(where: { $0.id == id })?.email
+                ?? grokStates[id]?.snapshot?.accountEmail
+        }
+        return states[.grok]?.snapshot?.accountEmail
             ?? GrokAuth.loadAuthFile()?.email
     }
 
-    /// One card per ChatGPT / OpenCode account; Cursor / GLM / Grok are a single card each.
+    var glmIdentity: String? {
+        states[.glm]?.snapshot?.accountEmail
+            ?? AccountIdentity.fromToken(glmAPIKey)
+    }
+
+    /// One card per ChatGPT / OpenCode / Grok account; Cursor / GLM are a single card each.
     var accountCards: [AccountCardRow] {
         if selected == .chatgpt {
             return chatgptDisplayRows.map { row in
@@ -134,14 +151,38 @@ final class AppStore: ObservableObject {
                 )
             }
         }
+        if selected == .grok {
+            return grokDisplayRows.map { row in
+                let credentials: Bool
+                if let account = row.account {
+                    credentials = hasGrokCredentials(account.id)
+                } else {
+                    credentials = GrokAuth.loadAuthFile() != nil
+                        || GrokAuth.normalizedOAuthToken(
+                            ProcessInfo.processInfo.environment["GROK_OAUTH_TOKEN"]
+                        ) != nil
+                }
+                return AccountCardRow(
+                    id: row.id.uuidString,
+                    email: row.account?.email ?? row.state.snapshot?.accountEmail,
+                    fallbackTitle: row.account?.label ?? "Grok",
+                    state: row.state,
+                    hasCredentials: credentials
+                )
+            }
+        }
         let state = states[selected] ?? .idle
         let email = state.snapshot?.accountEmail
         let fallback: String
         switch state {
         case .signedOut:
             fallback = "Not signed in"
-        case .ready:
-            fallback = "Email unknown"
+        case .ready(let snapshot):
+            if selected == .glm {
+                fallback = snapshot.accountEmail ?? snapshot.planName.map { "GLM \($0)" } ?? "GLM"
+            } else {
+                fallback = snapshot.accountEmail ?? "Email unknown"
+            }
         default:
             fallback = selected.title
         }
@@ -346,9 +387,9 @@ final class AppStore: ObservableObject {
     func persistSecrets() {
         KeychainStore.set(cursorCookie, account: .cursorCookie)
         KeychainStore.set(glmAPIKey, account: .glmAPIKey)
-        KeychainStore.set(grokOAuthToken, account: .grokOAuthToken)
         persistChatGPTSecrets()
         persistOpenCodeGoSecrets()
+        persistGrokSecrets()
     }
 
     private func persistChatGPTSecrets() {
@@ -574,6 +615,10 @@ final class AppStore: ObservableObject {
             await refreshAllOpenCodeGoAccounts(userInitiated: true)
             return
         }
+        if selected == .grok {
+            await refreshAllGrokAccounts(userInitiated: true)
+            return
+        }
         await refresh(selected)
     }
 
@@ -586,6 +631,11 @@ final class AppStore: ObservableObject {
         if selected == .opencodeGo, let id = UUID(uuidString: cardID),
            settings.opencodeGoAccounts.contains(where: { $0.id == id }) {
             await refreshOpenCodeGoAccount(id, userInitiated: true)
+            return
+        }
+        if selected == .grok, let id = UUID(uuidString: cardID),
+           settings.grokAccounts.contains(where: { $0.id == id }) {
+            await refreshGrokAccount(id, userInitiated: true)
             return
         }
         await refreshSelected()
@@ -636,6 +686,20 @@ final class AppStore: ObservableObject {
                     }
                 }
             }
+        case .grok:
+            if settings.grokAccounts.isEmpty {
+                let current = states[.grok] ?? .idle
+                if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+                    states[.grok] = .loading
+                }
+            } else {
+                for account in settings.grokAccounts {
+                    let current = grokStates[account.id] ?? .idle
+                    if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+                        grokStates[account.id] = .loading
+                    }
+                }
+            }
         default:
             states[provider] = .loading
         }
@@ -650,14 +714,17 @@ final class AppStore: ObservableObject {
             await refreshAllOpenCodeGoAccounts(userInitiated: false)
             return
         }
+        if provider == .grok {
+            await refreshAllGrokAccounts(userInitiated: false)
+            return
+        }
         states[provider] = .loading
         let job = SingleProviderFetchJob(
             provider: provider,
             preview: settings.previewFixtures,
             cursorCookie: emptyToNil(cursorCookie),
             glmAPIKey: emptyToNil(glmAPIKey),
-            glmRegion: settings.glmRegion,
-            grokToken: emptyToNil(grokOAuthToken)
+            glmRegion: settings.glmRegion
         )
         switch await RefreshWork.performSingle(job) {
         case .success(let snapshot):
@@ -1210,6 +1277,369 @@ extension AppStore {
         guard let index = settings.opencodeGoAccounts.firstIndex(where: { $0.id == id }) else { return }
         guard settings.opencodeGoAccounts[index].email != trimmed else { return }
         settings.opencodeGoAccounts[index].email = trimmed
+        persistSettings()
+    }
+}
+
+struct GrokDisplayRow: Identifiable, Equatable {
+    var id: UUID
+    var account: GrokAccount?
+    var state: ProviderLoadState
+}
+
+extension AppStore {
+    static let implicitGrokID = UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
+
+    var visibleGrokAccounts: [GrokAccount] {
+        settings.visibleGrokAccounts
+    }
+
+    func isActiveGrokCard(_ cardID: String) -> Bool {
+        guard selected == .grok else { return false }
+        if settings.grokAccounts.isEmpty {
+            return true
+        }
+        guard let active = activeGrokAccountId else { return false }
+        return cardID == active.uuidString
+    }
+
+    func activateGrokCard(_ cardID: String) {
+        guard selected == .grok else { return }
+        guard let id = UUID(uuidString: cardID) else { return }
+        selectGrokAccount(id)
+    }
+
+    var grokDisplayRows: [GrokDisplayRow] {
+        if !settings.grokAccounts.isEmpty {
+            return visibleGrokAccounts.map { account in
+                GrokDisplayRow(
+                    id: account.id,
+                    account: account,
+                    state: grokStates[account.id] ?? .idle
+                )
+            }
+        }
+        let implicit = states[.grok] ?? .idle
+        switch implicit {
+        case .ready, .loading, .failure:
+            return [GrokDisplayRow(id: Self.implicitGrokID, account: nil, state: implicit)]
+        case .idle:
+            if settings.previewFixtures {
+                return [GrokDisplayRow(id: Self.implicitGrokID, account: nil, state: implicit)]
+            }
+            return []
+        case .signedOut:
+            return []
+        }
+    }
+
+    var activeGrokAccountId: UUID? {
+        if settings.grokAccounts.isEmpty { return nil }
+        let visible = visibleGrokAccounts
+        if let selected = settings.selectedGrokAccountId,
+           visible.contains(where: { $0.id == selected }) {
+            return selected
+        }
+        if let signedIn = visible.first(where: { isSignedInGrok($0.id) }) {
+            return signedIn.id
+        }
+        return nil
+    }
+
+    var activeGrokState: ProviderLoadState {
+        if settings.grokAccounts.isEmpty {
+            return grokState(for: nil)
+        }
+        if let id = activeGrokAccountId {
+            return grokStates[id] ?? .idle
+        }
+        return .signedOut(ProviderKind.grok.signInHint)
+    }
+
+    var hasAmbientGrokAccount: Bool {
+        settings.grokAccounts.contains { $0.usesAmbientAuthFile }
+    }
+
+    var canImportAmbientGrok: Bool {
+        !hasAmbientGrokAccount && GrokAuth.loadAuthFile() != nil
+    }
+
+    private func isSignedInGrok(_ id: UUID) -> Bool {
+        if case .ready = grokStates[id] { return true }
+        return false
+    }
+
+    func hasGrokCredentials(_ id: UUID) -> Bool {
+        if emptyToNil(grokTokens[id, default: ""]) != nil { return true }
+        let account = settings.grokAccounts.first(where: { $0.id == id })
+        if account?.usesAmbientAuthFile == true, GrokAuth.loadAuthFile() != nil {
+            return true
+        }
+        return false
+    }
+
+    func selectGrokAccount(_ id: UUID) {
+        guard settings.grokAccounts.contains(where: { $0.id == id }) else { return }
+        guard settings.selectedGrokAccountId != id else { return }
+        settings.selectedGrokAccountId = id
+        persistSettings()
+    }
+
+    func nextGrokLabel() -> String {
+        let existing = Set(settings.grokAccounts.map(\.label))
+        if !existing.contains("Grok") { return "Grok" }
+        var index = 2
+        while existing.contains("Grok \(index)") {
+            index += 1
+        }
+        return "Grok \(index)"
+    }
+
+    @discardableResult
+    func addGrokAccount(label: String? = nil) -> UUID {
+        let id = UUID()
+        let trimmed = label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let resolved = trimmed.isEmpty ? nextGrokLabel() : trimmed
+        settings.grokAccounts.append(GrokAccount(id: id, label: resolved, enabled: true))
+        if settings.selectedGrokAccountId == nil {
+            settings.selectedGrokAccountId = id
+        }
+        grokTokens[id] = ""
+        grokStates[id] = .idle
+        persistSettings()
+        return id
+    }
+
+    /// Empty-state Add: import `~/.grok/auth.json` when it is unused, otherwise a blank row.
+    @discardableResult
+    func addGrokAccountOrImportAmbient() -> UUID {
+        if let imported = importAmbientGrokAccountIfAvailable() {
+            return imported
+        }
+        return addGrokAccount()
+    }
+
+    func renameGrokAccount(_ id: UUID, to label: String) {
+        guard let index = settings.grokAccounts.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        settings.grokAccounts[index].label = trimmed.isEmpty ? "Grok" : trimmed
+        persistSettings()
+    }
+
+    func deleteGrokAccount(_ id: UUID) {
+        settings.grokAccounts.removeAll { $0.id == id }
+        grokTokens[id] = nil
+        grokStates[id] = nil
+        KeychainStore.delete(.grokAccountOAuthToken(id))
+        if settings.selectedGrokAccountId == id {
+            settings.selectedGrokAccountId = nil
+            settings.resolveSelectedGrokAccount(preferring: signedInGrokAccountIDs())
+        }
+        persistSettings()
+    }
+
+    func setGrokOAuthToken(_ value: String, for id: UUID) {
+        grokTokens[id] = value
+        KeychainStore.set(value, account: .grokAccountOAuthToken(id))
+    }
+
+    @discardableResult
+    func importAmbientGrokAccountIfAvailable() -> UUID? {
+        if hasAmbientGrokAccount { return nil }
+        guard let creds = GrokAuth.loadAuthFile() else { return nil }
+        let email = creds.email ?? AccountIdentity.fromToken(creds.accessToken)
+        if let email,
+           let existing = settings.grokAccounts.first(where: {
+               $0.email?.caseInsensitiveCompare(email) == .orderedSame
+           }) {
+            if let index = settings.grokAccounts.firstIndex(where: { $0.id == existing.id }) {
+                settings.grokAccounts[index].email = email
+                settings.grokAccounts[index].usesAmbientAuthFile = true
+            }
+            settings.selectedGrokAccountId = existing.id
+            persistSettings()
+            Task { await refreshGrokAccount(existing.id, userInitiated: true) }
+            return existing.id
+        }
+
+        let id = addGrokAccount(label: email ?? nextGrokLabel())
+        if let index = settings.grokAccounts.firstIndex(where: { $0.id == id }) {
+            settings.grokAccounts[index].email = email
+            settings.grokAccounts[index].usesAmbientAuthFile = true
+        }
+        settings.selectedGrokAccountId = id
+        persistSettings()
+        Task { await refreshGrokAccount(id, userInitiated: true) }
+        return id
+    }
+
+    fileprivate func persistGrokSecrets() {
+        for account in settings.grokAccounts {
+            KeychainStore.set(grokTokens[account.id], account: .grokAccountOAuthToken(account.id))
+        }
+    }
+
+    fileprivate func loadGrokSecrets() {
+        for account in settings.grokAccounts {
+            grokTokens[account.id] = KeychainStore.get(.grokAccountOAuthToken(account.id)) ?? ""
+            grokStates[account.id] = .idle
+        }
+    }
+
+    fileprivate func refreshAllGrokAccounts(userInitiated: Bool) async {
+        let accounts = settings.grokAccounts
+        if accounts.isEmpty {
+            await refreshImplicitGrok(userInitiated: userInitiated)
+            return
+        }
+        var jobs: [GrokFetchJob] = []
+        for (index, account) in accounts.enumerated() {
+            let current = grokStates[account.id] ?? .idle
+            if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+                grokStates[account.id] = .loading
+            }
+            jobs.append(grokJob(for: account, previous: current, variant: index))
+        }
+
+        let results = await RefreshWork.mapConcurrent(jobs) { job in
+            await RefreshWork.performGrok(job)
+        }
+        for item in results {
+            applyGrokResult(item)
+        }
+        ensureActiveGrokAccount()
+    }
+
+    fileprivate func refreshGrokAccount(_ id: UUID, userInitiated: Bool) async {
+        guard let account = settings.grokAccounts.first(where: { $0.id == id }) else { return }
+        let current = grokStates[id] ?? .idle
+        if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+            grokStates[id] = .loading
+        }
+        let index = settings.grokAccounts.firstIndex(where: { $0.id == id }) ?? 0
+        applyGrokResult(await RefreshWork.performGrok(grokJob(for: account, previous: current, variant: index)))
+    }
+
+    private func grokJob(for account: GrokAccount, previous: ProviderLoadState, variant: Int) -> GrokFetchJob {
+        GrokFetchJob(
+            id: account.id,
+            previous: previous,
+            pastedToken: emptyToNil(grokTokens[account.id, default: ""]),
+            useAmbientFile: account.usesAmbientAuthFile,
+            allowEnvironment: false,
+            email: account.email,
+            preview: settings.previewFixtures,
+            variant: variant
+        )
+    }
+
+    private func applyGrokResult(_ item: AccountFetchResult) {
+        switch item.result {
+        case .success(let snapshot):
+            grokStates[item.id] = .ready(snapshot)
+            recordGrokIdentity(snapshot.accountEmail, for: item.id)
+        case .failure(let error):
+            grokStates[item.id] = grokFailureState(
+                previous: item.previous,
+                id: item.id,
+                error: error
+            )
+        }
+    }
+
+    private func grokFailureState(
+        previous: ProviderLoadState,
+        id: UUID,
+        error: Error
+    ) -> ProviderLoadState {
+        let message: String
+        let authFailure: Bool
+        if let quota = error as? QuotaError {
+            message = quota.errorDescription ?? ProviderKind.grok.signInHint
+            authFailure = quota.isAuthFailure
+        } else {
+            message = error.localizedDescription
+            authFailure = false
+        }
+        if case .ready(let snapshot) = previous {
+            return .ready(snapshot)
+        }
+        if authFailure, !hasGrokCredentials(id) {
+            return .signedOut(message)
+        }
+        return .failure(message)
+    }
+
+    private func refreshImplicitGrok(userInitiated: Bool) async {
+        let current = states[.grok] ?? .idle
+        if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+            states[.grok] = .loading
+        }
+        let item = await RefreshWork.performGrok(
+            GrokFetchJob(
+                id: Self.implicitGrokID,
+                previous: current,
+                pastedToken: nil,
+                useAmbientFile: true,
+                allowEnvironment: true,
+                email: nil,
+                preview: settings.previewFixtures,
+                variant: 0
+            )
+        )
+        switch item.result {
+        case .success(let snapshot):
+            states[.grok] = .ready(snapshot)
+        case .failure(let error):
+            if case .ready(let snapshot) = current {
+                states[.grok] = .ready(snapshot)
+            } else if error.isAuthFailure {
+                states[.grok] = .signedOut(error.errorDescription ?? ProviderKind.grok.signInHint)
+            } else {
+                states[.grok] = .failure(error.errorDescription ?? "Something went wrong.")
+            }
+        }
+    }
+
+    private func grokState(for id: UUID?) -> ProviderLoadState {
+        if settings.grokAccounts.isEmpty {
+            if settings.previewFixtures {
+                return states[.grok] ?? .idle
+            }
+            let implicit = states[.grok] ?? .idle
+            switch implicit {
+            case .idle:
+                return .signedOut(ProviderKind.grok.signInHint)
+            default:
+                return implicit
+            }
+        }
+        guard let id, settings.grokAccounts.contains(where: { $0.id == id }) else {
+            return .signedOut(ProviderKind.grok.signInHint)
+        }
+        return grokStates[id] ?? .idle
+    }
+
+    private func signedInGrokAccountIDs() -> [UUID] {
+        visibleGrokAccounts.compactMap { account in
+            isSignedInGrok(account.id) ? account.id : nil
+        }
+    }
+
+    private func ensureActiveGrokAccount() {
+        let before = settings.selectedGrokAccountId
+        settings.resolveSelectedGrokAccount(preferring: signedInGrokAccountIDs())
+        if settings.selectedGrokAccountId != before {
+            persistSettings()
+        }
+    }
+
+    private func recordGrokIdentity(_ identity: String?, for id: UUID) {
+        let trimmed = AccountIdentity.usableHandle(identity)
+        guard let trimmed else { return }
+        guard let index = settings.grokAccounts.firstIndex(where: { $0.id == id }) else { return }
+        guard settings.grokAccounts[index].email != trimmed else { return }
+        settings.grokAccounts[index].email = trimmed
         persistSettings()
     }
 }

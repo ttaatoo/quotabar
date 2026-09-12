@@ -135,7 +135,7 @@ Restrained night neutrals, chroma leaned toward the violet accent so the pane do
 - **Violet Hairline** (`{colors.settings-hairline}`): 1px group and field strokes.
 
 ### Named hues (icons only)
-Cursor blue, ChatGPT violet, GLM green, Grok amber, OpenCode teal exist for 12pt SF Symbols and the popover meters. They are not section backgrounds and not primary button fills.
+Cursor blue, ChatGPT violet, GLM green, Grok amber, OpenCode teal tint the bundled 12pt brand marks and the popover meters. They are not section backgrounds and not primary button fills.
 
 ### Semantic
 - **Warning** (`{colors.settings-warning}`): Rejected Grok token.
@@ -186,7 +186,7 @@ No shadows. Depth is a three-step night stack: rail darker than page, group ligh
 
 ### Sidebar
 - 172pt rail, 28pt rows, 7pt selected wash
-- Icons 12pt; selected icon and label use accent / paper
+- Brand marks 12pt for provider rows; SF Symbols only for Quota / App chrome; selected icon and label use accent / paper
 - “Off” badge when that provider is hidden from the popover
 - Arrow keys move the section
 
@@ -197,7 +197,7 @@ No shadows. Depth is a three-step night stack: rail darker than page, group ligh
 - Advanced disclosure starts collapsed
 
 ### Empty states
-- Soft well + SF Symbol, title, one teaching sentence, one primary action
+- Soft well + brand mark (or SF Symbol for non-provider empty states), title, one teaching sentence, one primary action
 - Never a lone “No accounts yet.”
 
 ### Navigation
@@ -210,8 +210,8 @@ No shadows. Depth is a three-step night stack: rail darker than page, group ligh
 - **Do** keep Settings in the Night Menu Extra register: dark, dense, native.
 - **Do** put every Settings color through `Theme` tokens.
 - **Do** collapse Advanced cookie/JSON by default.
-- **Do** teach empty ChatGPT and OpenCode lists with a next action.
-- **Do** leave Keychain account names and `config.json` keys unchanged.
+- **Do** teach empty ChatGPT, Grok, and OpenCode lists with a next action.
+- **Do** leave existing Keychain account names and `config.json` keys unchanged; new Grok account keys are additive.
 
 ### Don't:
 - **Don't** clone bright macOS System Settings (large white grouped lists, toolbar icon grid).

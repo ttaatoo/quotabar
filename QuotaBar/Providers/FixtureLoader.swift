@@ -30,6 +30,7 @@ enum FixtureLoader {
             let email = JSONWalk.string(object, keys: ["email", "accountEmail"])
             let plan = JSONWalk.string(object, keys: ["subscription_tier_display", "plan", "planName"])
             snapshot = try GrokClient.parse(object, email: email, planFallback: plan, fetchedAt: now)
+            snapshot = varyGrok(snapshot, variant: variant)
         case .opencodeGo:
             snapshot = try OpenCodeGoClient.parse(object, fetchedAt: now)
             snapshot = varyOpenCodeGo(snapshot, variant: variant)
@@ -87,6 +88,28 @@ enum FixtureLoader {
             weekly.usedPercent = used
             weekly.remainingPercent = Percent.remaining(used: used)
             snap.weekly = weekly
+        }
+        return snap
+    }
+
+    private static func varyGrok(_ snapshot: UsageSnapshot, variant: Int) -> UsageSnapshot {
+        guard variant > 0 else { return snapshot }
+        var snap = snapshot
+        let usedChoices = [18.0, 72.0, 41.0]
+        let used = usedChoices[(variant - 1) % usedChoices.count]
+        if var weekly = snap.weekly {
+            weekly.usedPercent = used
+            weekly.remainingPercent = Percent.remaining(used: used)
+            snap.weekly = weekly
+        } else if var session = snap.session {
+            session.usedPercent = used
+            session.remainingPercent = Percent.remaining(used: used)
+            snap.session = session
+        }
+        switch variant % 3 {
+        case 1: snap.planName = "SuperGrok Heavy"
+        case 2: snap.planName = "SuperGrok"
+        default: break
         }
         return snap
     }

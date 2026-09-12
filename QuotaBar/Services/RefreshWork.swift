@@ -126,6 +126,21 @@ enum RefreshWork {
         }
     }
 
+    static func performGrok(
+        _ job: GrokFetchJob
+    ) async -> AccountFetchResult {
+        await detached {
+            do {
+                let snapshot = try await withTimeout(seconds: providerTimeout) {
+                    try await fetchGrok(job)
+                }
+                return AccountFetchResult(id: job.id, previous: job.previous, result: .success(snapshot))
+            } catch {
+                return AccountFetchResult(id: job.id, previous: job.previous, result: .failure(quotaError(error)))
+            }
+        }
+    }
+
     static func performSingle(_ job: SingleProviderFetchJob) async -> Result<UsageSnapshot, QuotaError> {
         await detached {
             do {
@@ -169,6 +184,22 @@ enum RefreshWork {
         return try await OpenCodeGoClient.fetch(apiKey: job.apiKey)
     }
 
+    private static func fetchGrok(_ job: GrokFetchJob) async throws -> UsageSnapshot {
+        if job.preview {
+            return try FixtureLoader.load(
+                .grok,
+                now: Date(),
+                variant: job.variant,
+                emailOverride: job.email
+            )
+        }
+        return try await GrokClient.fetch(
+            pastedToken: job.pastedToken,
+            useAmbientFile: job.useAmbientFile,
+            allowEnvironment: job.allowEnvironment
+        )
+    }
+
     private static func fetchSingle(_ job: SingleProviderFetchJob) async throws -> UsageSnapshot {
         if job.preview {
             return try FixtureLoader.load(job.provider, now: Date())
@@ -178,9 +209,7 @@ enum RefreshWork {
             return try await CursorClient.fetch(cookie: job.cursorCookie)
         case .glm:
             return try await GLMClient.fetch(apiKey: job.glmAPIKey, region: job.glmRegion)
-        case .grok:
-            return try await GrokClient.fetch(pastedToken: job.grokToken)
-        case .chatgpt, .opencodeGo:
+        case .chatgpt, .opencodeGo, .grok:
             throw QuotaError.schema("Use the multi-account refresh path.")
         }
     }
@@ -207,13 +236,23 @@ struct OpenCodeGoFetchJob: Sendable {
     var variant: Int
 }
 
+struct GrokFetchJob: Sendable {
+    var id: UUID
+    var previous: ProviderLoadState
+    var pastedToken: String?
+    var useAmbientFile: Bool
+    var allowEnvironment: Bool
+    var email: String?
+    var preview: Bool
+    var variant: Int
+}
+
 struct SingleProviderFetchJob: Sendable {
     var provider: ProviderKind
     var preview: Bool
     var cursorCookie: String?
     var glmAPIKey: String?
     var glmRegion: GLMRegion
-    var grokToken: String?
 }
 
 struct AccountFetchResult: Sendable {

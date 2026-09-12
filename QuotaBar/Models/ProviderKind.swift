@@ -63,7 +63,7 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable, Hashable, Sendab
         case .glm:
             return "Paste a z.ai / BigModel API key in Settings, or set Z_AI_API_KEY."
         case .grok:
-            return GrokAuth.signInHint
+            return "Add a Grok account in Settings. Run `grok login`, or paste a SuperGrok bearer."
         case .opencodeGo:
             return "Add an OpenCode Go API key in Settings."
         }

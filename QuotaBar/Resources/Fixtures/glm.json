@@ -2,9 +2,12 @@
   "code": 200,
   "msg": "Operation successful",
   "success": true,
+  "email": "user@example.com",
   "data": {
     "planName": "Pro",
     "level": "pro",
+    "email": "user@example.com",
+    "username": "user",
     "limits": [
       {
         "type": "TOKENS_LIMIT",

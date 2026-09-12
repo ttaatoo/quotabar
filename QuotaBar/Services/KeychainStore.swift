@@ -10,6 +10,7 @@ enum KeychainAccount: Hashable {
     case chatgptAccountCookie(UUID)
     case chatgptAccountJSON(UUID)
     case opencodeGoAPIKey(UUID)
+    case grokAccountOAuthToken(UUID)
 
     var rawValue: String {
         switch self {
@@ -29,6 +30,8 @@ enum KeychainAccount: Hashable {
             return "chatgpt.json.\(id.uuidString)"
         case .opencodeGoAPIKey(let id):
             return "opencodeGo.apiKey.\(id.uuidString)"
+        case .grokAccountOAuthToken(let id):
+            return "grok.oauth-token.\(id.uuidString)"
         }
     }
 }

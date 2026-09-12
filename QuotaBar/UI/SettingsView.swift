@@ -6,6 +6,7 @@ struct SettingsView: View {
     private enum AccountKind {
         case chatgpt
         case opencodeGo
+        case grok
     }
 
     @State private var section: SettingsSection = .providers
@@ -36,7 +37,6 @@ struct SettingsView: View {
         }
         .onChange(of: store.cursorCookie) { _, _ in store.persistSecrets() }
         .onChange(of: store.glmAPIKey) { _, _ in store.persistSecrets() }
-        .onChange(of: store.grokOAuthToken) { _, _ in store.persistSecrets() }
         .onChange(of: store.settings) { _, _ in
             store.persistSettings()
             store.restartPolling()
@@ -57,13 +57,15 @@ struct SettingsView: View {
                         store.renameChatGPTAccount(renameID, to: renameLabel)
                     case .opencodeGo:
                         store.renameOpenCodeGoAccount(renameID, to: renameLabel)
+                    case .grok:
+                        store.renameGrokAccount(renameID, to: renameLabel)
                     }
                 }
             }
             Button("Cancel", role: .cancel) {}
         }
         .confirmationDialog(
-            deleteKind == .chatgpt ? "Delete this ChatGPT account?" : "Delete this OpenCode account?",
+            deleteDialogTitle,
             isPresented: deletePresented,
             titleVisibility: .visible
         ) {
@@ -74,14 +76,14 @@ struct SettingsView: View {
                         store.deleteChatGPTAccount(deleteID)
                     case .opencodeGo:
                         store.deleteOpenCodeGoAccount(deleteID)
+                    case .grok:
+                        store.deleteGrokAccount(deleteID)
                     }
                 }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(deleteKind == .chatgpt
-                 ? "The Keychain cookie and JSON for this account are removed. A private Codex home is deleted when it belongs to QuotaBar; ~/.codex/auth.json is never deleted."
-                 : "The Keychain API key for this OpenCode account is removed. Other accounts stay.")
+            Text(deleteDialogMessage)
         }
     }
 
@@ -220,6 +222,7 @@ struct SettingsView: View {
             if store.settings.chatgptAccounts.isEmpty {
                 SettingsGroup {
                     SettingsEmptyState(
+                        provider: .chatgpt,
                         symbol: ProviderKind.chatgpt.settingsSymbol,
                         title: "No ChatGPT accounts",
                         message: "Add an account to sign in with Codex in your browser, or paste a session cookie under Advanced after you add one.",
@@ -257,6 +260,7 @@ struct SettingsView: View {
             if store.settings.opencodeGoAccounts.isEmpty {
                 SettingsGroup {
                     SettingsEmptyState(
+                        provider: .opencodeGo,
                         symbol: ProviderKind.opencodeGo.settingsSymbol,
                         title: "No OpenCode accounts",
                         message: "Add an account, then paste a Go API key. QuotaBar also reads OPENCODE_GO_API_KEY when no accounts exist yet.",
@@ -286,6 +290,11 @@ struct SettingsView: View {
                 subtitle: "Stored in the Keychain. Also accepted from ~/.config/quotabar/config.json or Z_AI_API_KEY."
             )
             SettingsGroup {
+                statusRow(
+                    title: glmStatusTitle,
+                    subtitle: glmStatusSubtitle
+                )
+                SettingsInsetHairline()
                 SettingsLabeledField(label: "API key") {
                     SettingsSecretField(
                         placeholder: "API key",
@@ -314,31 +323,44 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 16) {
             SettingsPaneHeader(
                 title: SettingsSection.grok.paneTitle,
-                subtitle: "QuotaBar reads ~/.grok/auth.json from `grok login`. It never writes or refreshes that file."
-            )
-            SettingsGroup {
-                statusRow(
-                    title: grokStatusTitle,
-                    subtitle: grokStatusSubtitle
-                )
-                SettingsInsetHairline()
-                SettingsLabeledField(label: "SuperGrok bearer (optional)") {
-                    SettingsSecretField(
-                        placeholder: "SuperGrok bearer",
-                        text: $store.grokOAuthToken,
-                        warning: grokTokenRejected,
-                        focusID: "grok.token",
-                        focusedField: $focusedField
-                    )
+                subtitle: "Add account imports ~/.grok/auth.json when it is unused, or adds a SuperGrok bearer row. QuotaBar never writes or refreshes that file."
+            ) {
+                HStack(spacing: 8) {
+                    if store.canImportAmbientGrok, !store.settings.grokAccounts.isEmpty {
+                        SettingsSecondaryButton(title: "Import grok login", systemImage: "square.and.arrow.down") {
+                            _ = store.importAmbientGrokAccountIfAvailable()
+                        }
+                    }
+                    if !store.settings.grokAccounts.isEmpty {
+                        SettingsSecondaryButton(title: "Add account", systemImage: "plus") {
+                            addGrokAccount()
+                        }
+                    }
                 }
             }
-            if grokTokenRejected {
-                SettingsCaption(
-                    text: "Rejected: paste a SuperGrok bearer, not an xai- management key or cookie.",
-                    tone: .warning
-                )
+
+            if store.settings.grokAccounts.isEmpty {
+                SettingsGroup {
+                    SettingsEmptyState(
+                        provider: .grok,
+                        symbol: ProviderKind.grok.settingsSymbol,
+                        title: "No Grok accounts",
+                        message: "Add an account to import `grok login` or paste a SuperGrok bearer. GROK_OAUTH_TOKEN is used when no accounts exist yet.",
+                        actionTitle: "Add account"
+                    ) {
+                        addGrokAccountFromEmpty()
+                    }
+                }
             } else {
-                SettingsCaption(text: "Optional if `grok login` already wrote ~/.grok/auth.json. Also accepted from GROK_OAUTH_TOKEN.")
+                SettingsGroup {
+                    ForEach(Array(store.settings.grokAccounts.enumerated()), id: \.element.id) { index, account in
+                        if index > 0 {
+                            SettingsInsetHairline()
+                        }
+                        grokAccountRow(account)
+                    }
+                }
+                SettingsCaption(text: "Deleting a row removes its Keychain bearer. ~/.grok/auth.json is never deleted.")
             }
         }
     }
@@ -428,17 +450,8 @@ struct SettingsView: View {
     private func providerRow(_ provider: ProviderKind) -> some View {
         let on = store.settings.enabledProviders.contains(provider)
         let onlyOn = on && store.settings.enabledProviders.count == 1
-        let tint = Theme.settingsTint(for: provider)
         return HStack(alignment: .center, spacing: 10) {
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(tint.opacity(0.16))
-                .frame(width: 26, height: 26)
-                .overlay {
-                    Image(systemName: provider.settingsSymbol)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(tint)
-                }
-                .accessibilityHidden(true)
+            SettingsProviderWell(provider: provider)
             VStack(alignment: .leading, spacing: 2) {
                 Text(provider.title)
                     .font(.system(size: 13, weight: .medium))
@@ -465,6 +478,7 @@ struct SettingsView: View {
     private func chatgptAccountRow(_ account: ChatGPTAccount) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 10) {
+                SettingsProviderWell(provider: .chatgpt, size: 22, iconSize: 11)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(account.displayTitle)
                         .font(.system(size: 13, weight: .medium))
@@ -527,6 +541,7 @@ struct SettingsView: View {
     private func opencodeAccountRow(_ account: OpenCodeGoAccount) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 10) {
+                SettingsProviderWell(provider: .opencodeGo, size: 22, iconSize: 11)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(account.displayTitle)
                         .font(.system(size: 13, weight: .medium))
@@ -568,6 +583,54 @@ struct SettingsView: View {
         .padding(.vertical, 10)
     }
 
+    private func grokAccountRow(_ account: GrokAccount) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 10) {
+                SettingsProviderWell(provider: .grok, size: 22, iconSize: 11)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(account.displayTitle)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.settingsPrimary)
+                        .lineLimit(1)
+                    Text(grokAccountSubtitle(account))
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.settingsSecondary)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                SettingsIconButton(systemName: "pencil", help: "Rename") {
+                    renameKind = .grok
+                    renameID = account.id
+                    renameLabel = account.label
+                }
+                SettingsIconButton(systemName: "trash", help: "Delete", destructive: true) {
+                    deleteKind = .grok
+                    deleteID = account.id
+                }
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("SuperGrok bearer (optional)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.settingsSecondary)
+                SettingsSecretField(
+                    placeholder: "SuperGrok bearer",
+                    text: grokTokenBinding(account.id),
+                    warning: grokTokenRejected(account.id),
+                    focusID: "grok.token.\(account.id.uuidString)",
+                    focusedField: $focusedField
+                )
+            }
+            if grokTokenRejected(account.id) {
+                SettingsCaption(
+                    text: "Rejected: paste a SuperGrok bearer, not an xai- management key or cookie.",
+                    tone: .warning
+                )
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
     private func statusRow(title: String, subtitle: String) -> some View {
         SettingsRow(title: title, subtitle: subtitle) {
             EmptyView()
@@ -588,24 +651,66 @@ struct SettingsView: View {
         return "No email from Cursor yet. Sign in to Cursor.app, or paste a cookie below."
     }
 
-    private var grokStatusTitle: String {
-        if let email = store.grokEmail, !email.isEmpty {
-            return email
+    private var glmStatusTitle: String {
+        if let identity = store.glmIdentity, !identity.isEmpty {
+            return identity
         }
-        return "Not signed in"
+        if case .ready(let snapshot) = store.states[.glm], let plan = snapshot.planName, !plan.isEmpty {
+            return "GLM \(plan)"
+        }
+        return "No identity yet"
     }
 
-    private var grokStatusSubtitle: String {
-        if let email = store.grokEmail, !email.isEmpty {
-            return "Identity from ~/.grok/auth.json"
+    private var glmStatusSubtitle: String {
+        if let identity = store.glmIdentity, !identity.isEmpty {
+            if identity.contains("@") {
+                return "Identity from the quota API, token, or profile."
+            }
+            return "Username or id from the quota API or token. The quota endpoint often has no email."
         }
-        return "Run `grok login` in Terminal, then Refresh."
+        return "Paste a key and Refresh. QuotaBar shows email, username, or id when the API or token has one."
     }
 
-    private var grokTokenRejected: Bool {
-        let raw = store.grokOAuthToken.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func grokAccountSubtitle(_ account: GrokAccount) -> String {
+        if account.usesAmbientAuthFile {
+            if let email = account.email,
+               !email.isEmpty,
+               account.label.caseInsensitiveCompare(email) != .orderedSame {
+                return "\(account.label) · ~/.grok/auth.json"
+            }
+            return "Uses ~/.grok/auth.json"
+        }
+        if let email = account.email,
+           !email.isEmpty,
+           account.label.caseInsensitiveCompare(email) != .orderedSame {
+            return account.label
+        }
+        return "Optional bearer if `grok login` is not this account"
+    }
+
+    private func grokTokenRejected(_ id: UUID) -> Bool {
+        let raw = store.grokTokens[id, default: ""].trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return false }
         return GrokAuth.normalizedOAuthToken(raw) == nil
+    }
+
+    private var deleteDialogTitle: String {
+        switch deleteKind {
+        case .chatgpt: return "Delete this ChatGPT account?"
+        case .opencodeGo: return "Delete this OpenCode account?"
+        case .grok: return "Delete this Grok account?"
+        }
+    }
+
+    private var deleteDialogMessage: String {
+        switch deleteKind {
+        case .chatgpt:
+            return "The Keychain cookie and JSON for this account are removed. A private Codex home is deleted when it belongs to QuotaBar; ~/.codex/auth.json is never deleted."
+        case .opencodeGo:
+            return "The Keychain API key for this OpenCode account is removed. Other accounts stay."
+        case .grok:
+            return "The Keychain bearer for this account is removed. ~/.grok/auth.json is never deleted."
+        }
     }
 
     private func sidebarBadge(for item: SettingsSection) -> String? {
@@ -633,6 +738,16 @@ struct SettingsView: View {
     private func addOpenCodeAccount() {
         let id = store.addOpenCodeGoAccount()
         focusedField = "opencode.key.\(id.uuidString)"
+    }
+
+    private func addGrokAccount() {
+        let id = store.addGrokAccount()
+        focusedField = "grok.token.\(id.uuidString)"
+    }
+
+    private func addGrokAccountFromEmpty() {
+        let id = store.addGrokAccountOrImportAmbient()
+        focusedField = "grok.token.\(id.uuidString)"
     }
 
     private func providerBinding(_ provider: ProviderKind) -> Binding<Bool> {
@@ -682,6 +797,13 @@ struct SettingsView: View {
         )
     }
 
+    private func grokTokenBinding(_ id: UUID) -> Binding<String> {
+        Binding(
+            get: { store.grokTokens[id, default: ""] },
+            set: { store.setGrokOAuthToken($0, for: id) }
+        )
+    }
+
     private func jsonBinding(_ id: UUID) -> Binding<String> {
         Binding(
             get: { store.chatgptJSONs[id, default: ""] },
@@ -707,7 +829,7 @@ private extension ProviderKind {
         case .glm:
             return "z.ai / BigModel API key"
         case .grok:
-            return "SuperGrok via `grok login`"
+            return "Multi-account SuperGrok bearers / grok login"
         case .opencodeGo:
             return "Multi-account Go API keys"
         }

@@ -47,7 +47,7 @@ enum GrokAuth {
     static let legacySessionScope = "https://accounts.x.ai/sign-in"
 
     static let signInHint =
-        "Run `grok login` (writes ~/.grok/auth.json) or paste a SuperGrok bearer in Settings."
+        "Add a Grok account in Settings. Run `grok login` (writes ~/.grok/auth.json) or paste a SuperGrok bearer."
 
     static func grokHomeURL(env: [String: String] = ProcessInfo.processInfo.environment) -> URL {
         let custom = env["GROK_HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -62,20 +62,23 @@ enum GrokAuth {
         grokHomeURL(env: env).appendingPathComponent("auth.json")
     }
 
-    /// Prefer a non-expired `auth.json`, then a pasted SuperGrok bearer, then `GROK_OAUTH_TOKEN`.
-    /// Expired or missing files are not sent. QuotaBar never refreshes tokens.
+    /// Prefer a non-expired `auth.json` when allowed, then a pasted SuperGrok bearer,
+    /// then `GROK_OAUTH_TOKEN` when allowed. Expired or missing files are not sent.
+    /// QuotaBar never refreshes tokens.
     static func resolve(
         pasted: String?,
+        useAmbientFile: Bool = true,
+        allowEnvironment: Bool = true,
         env: [String: String] = ProcessInfo.processInfo.environment
     ) throws -> Credentials {
-        if let file = loadAuthFile(env: env), !file.isExpired {
+        if useAmbientFile, let file = loadAuthFile(env: env), !file.isExpired {
             return file
         }
 
         if let token = normalizedOAuthToken(pasted) {
             return Credentials(
                 accessToken: token,
-                email: nil,
+                email: AccountIdentity.fromToken(token),
                 expiresAt: nil,
                 authMode: "oidc",
                 teamId: nil,
@@ -84,10 +87,10 @@ enum GrokAuth {
             )
         }
 
-        if let token = normalizedOAuthToken(env["GROK_OAUTH_TOKEN"]) {
+        if allowEnvironment, let token = normalizedOAuthToken(env["GROK_OAUTH_TOKEN"]) {
             return Credentials(
                 accessToken: token,
-                email: nil,
+                email: AccountIdentity.fromToken(token),
                 expiresAt: nil,
                 authMode: "oidc",
                 teamId: nil,
@@ -96,7 +99,7 @@ enum GrokAuth {
             )
         }
 
-        if let file = loadAuthFile(env: env), file.isExpired {
+        if useAmbientFile, let file = loadAuthFile(env: env), file.isExpired {
             throw QuotaError.notSignedIn("Grok token expired. Run `grok login` again, or paste a SuperGrok bearer in Settings.")
         }
 
@@ -107,6 +110,9 @@ enum GrokAuth {
             )
         }
 
+        if !useAmbientFile {
+            throw QuotaError.notSignedIn("Paste a SuperGrok bearer for this account in Settings.")
+        }
         throw QuotaError.notSignedIn(signInHint)
     }
 
@@ -143,6 +149,8 @@ enum GrokAuth {
         guard !token.isEmpty else { return nil }
 
         let email = JSONWalk.string(preferred.entry, keys: ["email"])
+            ?? AccountIdentity.fromJSON(preferred.entry)
+            ?? AccountIdentity.fromToken(token)
         return Credentials(
             accessToken: token,
             email: email,

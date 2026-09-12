@@ -31,6 +31,11 @@ struct PopoverView: View {
         HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
+                    ProviderMark(
+                        provider: store.selected,
+                        size: 12,
+                        tint: Theme.settingsTint(for: store.selected)
+                    )
                     Text(store.selected.title)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Theme.primary)
@@ -72,12 +77,13 @@ struct PopoverView: View {
                 ForEach(rows) { row in
                     AccountCard(
                         row: row,
+                        provider: store.selected,
                         mode: store.settings.displayMode,
                         now: store.now,
                         onRetry: { Task { await store.refreshCard(row.id) } },
                         onOpenSettings: store.openSettings,
                         isActive: store.isActiveAccountCard(row.id),
-                        onActivate: (store.selected == .chatgpt || store.selected == .opencodeGo)
+                        onActivate: (store.selected == .chatgpt || store.selected == .opencodeGo || store.selected == .grok)
                             ? { store.activateAccountCard(row.id) }
                             : nil,
                         reduceMotion: reduceMotion,
@@ -163,7 +169,7 @@ struct PopoverView: View {
                 updated = "Update failed"
             }
         }
-        if (store.selected == .chatgpt || store.selected == .opencodeGo), rows.count > 1 {
+        if (store.selected == .chatgpt || store.selected == .opencodeGo || store.selected == .grok), rows.count > 1 {
             return "\(rows.count) accounts · \(updated)"
         }
         return updated
@@ -180,6 +186,7 @@ struct PopoverView: View {
 /// Shared account chrome: email + plan, that account's meters, extra footer inside the card.
 struct AccountCard: View {
     let row: AccountCardRow
+    var provider: ProviderKind
     let mode: DisplayMode
     let now: Date
     let onRetry: () -> Void
@@ -273,6 +280,11 @@ struct AccountCard: View {
 
     private var headerRow: some View {
         HStack(alignment: .center, spacing: 6) {
+            ProviderMark(
+                provider: provider,
+                size: 11,
+                tint: Theme.settingsTint(for: provider)
+            )
             Text(title)
                 .font(.system(size: 11.5, weight: .semibold))
                 .foregroundStyle(Theme.primary)

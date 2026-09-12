@@ -31,9 +31,9 @@ To build from `main` instead of the cask: `brew install --formula --HEAD ttaatoo
 
 ## What you get
 
-- Status item: dark rounded pill with a small bar-chart mark and a percentage. ChatGPT uses the **active** account’s Weekly remaining % (click a card in the popover to choose; the choice is saved in `~/.config/quotabar/config.json`). Cursor uses the **higher** remaining of Cursor Models / Other Models, and turns orange if **either** pool is below 25% remaining (or 0%). GLM, Grok, and OpenCode Go use the most-constrained window. The number turns orange below 25% remaining.
-- Popover (not a detached window): fixed compact chrome (`320×360`) so switching providers does not rewrite `contentSize` or move the arrow. The taller body fits about two two-window cards or three weekly-only cards; extra accounts scroll above Settings / Quit. Header is the same for every tab: provider title, “Updated …” (ChatGPT or OpenCode with two or more accounts prefixes `N accounts ·`), refresh — **email is never in the subtitle**. Provider pills stay one compact row (short **Go** title; overflow scrolls rather than wrapping). The body is always the same top-aligned `ScrollView` of hugging account cards (email or “Not signed in” / a short hint, plan badge, that account’s meters, Credits / On-demand inside the card). Cards never stretch to fill leftover body space — that leftover is the popover background. ChatGPT and OpenCode stack one card per account; Cursor / GLM / Grok are one card each. Empty Session / Weekly / Monthly windows are omitted. Settings… and Quit QuotaBar stay in the footer.
-- Settings: same dark Theme as the popover. Enable each provider (including OpenCode), add / rename / delete ChatGPT accounts (Add account or Re-login runs `codex login` in the default browser), add OpenCode Go API-key accounts, paste Cursor / GLM / Grok credentials in compact secret fields, GLM region, poll interval (default 120s), remaining vs used, launch at login (`SMAppService`), and an off-by-default **Preview fixtures** toggle for screenshots.
+- Status item: dark rounded pill with a small bar-chart mark and a percentage. ChatGPT, Grok, and OpenCode Go use the **active** account’s remaining % (click a card in the popover to choose; the choice is saved in `~/.config/quotabar/config.json`). Cursor uses the **higher** remaining of Cursor Models / Other Models, and turns orange if **either** pool is below 25% remaining (or 0%). GLM, Grok, and OpenCode Go use the most-constrained window. The number turns orange below 25% remaining.
+- Popover (not a detached window): fixed compact chrome (`320×360`) so switching providers does not rewrite `contentSize` or move the arrow. The taller body fits about two two-window cards or three weekly-only cards; extra accounts scroll above Settings / Quit. Header is the same for every tab: bundled brand mark, provider title, “Updated …” (ChatGPT, Grok, or OpenCode with two or more accounts prefixes `N accounts ·`), refresh — **email is never in the subtitle**. Provider pills stay one compact row (short **Go** title; overflow scrolls rather than wrapping). The body is always the same top-aligned `ScrollView` of hugging account cards (email or “Not signed in” / a short hint, plan badge, that account’s meters, Credits / On-demand inside the card). Cards never stretch to fill leftover body space — that leftover is the popover background. ChatGPT, Grok, and OpenCode stack one card per account; Cursor / GLM are one card each. Empty Session / Weekly / Monthly windows are omitted. Settings… and Quit QuotaBar stay in the footer.
+- Settings: same dark Theme as the popover. Sidebar and account wells use bundled brand marks (not SF Symbols). Enable each provider (including OpenCode), add / rename / delete ChatGPT, Grok, and OpenCode Go accounts (ChatGPT Add account or Re-login runs `codex login` in the default browser), paste Cursor / GLM credentials in compact secret fields, GLM region, poll interval (default 120s), remaining vs used, launch at login (`SMAppService`), and an off-by-default **Preview fixtures** toggle for screenshots.
 
 If a provider is not signed in, you see a “Sign in / add key” empty state — never fake 100% bars.
 
@@ -96,7 +96,7 @@ Secrets go in the macOS Keychain (`app.quotabar.QuotaBar`). Non-secret preferenc
 
 ### ChatGPT (Plus / Pro)
 
-ChatGPT and OpenCode Go have **multi-account** support. Cursor, GLM, and Grok stay single-account. There is no separate Codex provider and **no custom ChatGPT OAuth app**.
+ChatGPT, Grok, and OpenCode Go have **multi-account** support. Cursor and GLM stay single-account. There is no separate Codex provider and **no custom ChatGPT OAuth app**.
 
 QuotaBar uses the same live usage path CodexBar uses:
 
@@ -121,18 +121,22 @@ QuotaBar uses the same live usage path CodexBar uses:
 2. Pick a region: **Global** `https://api.z.ai` or **China** `https://open.bigmodel.cn`.
 3. Live fetch: `GET {host}/api/monitor/usage/quota/limit` with `Authorization: Bearer <token>`.
 4. Shortest `TOKENS_LIMIT` (~5h) → Session; longer `TOKENS_LIMIT` (~weekly) → Weekly. `nextResetTime` drives the countdown. `planName` / `level` is the badge. MCP extras stay inside the card footer.
+5. Identity: the quota JSON often has no email. QuotaBar then reads username / id from that JSON, the API-key JWT, or a 2s profile GET (`/api/paas/v4/user`, `/api/monitor/user`, `/api/paas/v4/user/credit_grants`). Settings and the popover card stay consistent. If nothing usable is found, the card shows `GLM <plan>` (or `GLM`) rather than “Email unknown”.
 
 ### Grok (consumer SuperGrok)
 
-This is **consumer Grok / SuperGrok**, not the xAI Management API prepaid team balance. QuotaBar does not accept `xai-` console keys.
+This is **consumer Grok / SuperGrok**, not the xAI Management API prepaid team balance. QuotaBar does not accept `xai-` console keys. Grok is **multi-account**, like ChatGPT / OpenCode Go.
 
-1. Prefer identity + bearer from `~/.grok/auth.json` (or `$GROK_HOME/auth.json`) written by `grok login`. Top-level keys are OIDC scope URLs; QuotaBar prefers `https://auth.x.ai::` (SuperGrok), then `https://accounts.x.ai/sign-in`. Fields used: `key` (bearer), `email`, `expires_at`, `auth_mode`, `team_id`. QuotaBar does **not** refresh or rewrite that file.
-2. Optional Settings paste: SuperGrok bearer (`GROK_OAUTH_TOKEN` is also accepted). `xai-` management keys and cookie-shaped values are rejected on the OAuth field.
-3. Live fetch: `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits` with `Authorization: Bearer <key>`, `x-xai-token-auth: xai-grok-cli`, and `Accept: application/json`.
-4. Used % = `config.creditUsagePercent`, else `onDemandUsed.val / onDemandCap.val * 100`. A parseable current period without those values is **0% used**. Never invent a bar from credits-alone with no period.
-5. Reset = `config.currentPeriod.end`, then `config.billingPeriodEnd`. Window title is Weekly or Monthly from that reset cycle (same classification as ChatGPT), else “Credits”. One real window is enough; empty Session is omitted.
-6. Plan: `GET https://cli-chat-proxy.grok.com/v1/settings` → `subscription_tier_display` (SuperGrok / SuperGrok Heavy), 2s timeout. If that fails, fall back to OIDC SuperGrok / `auth_mode`. Settings never blocks usage.
-7. Email from `auth.json` is shown on the Grok card. If the file is missing or expired: not signed in, with a `grok login` hint.
+1. In Settings → Grok, **Add account**. If `~/.grok/auth.json` (or `$GROK_HOME/auth.json`) exists and no account uses it yet, the first Add **imports** it (email from the file or JWT) without deleting or rewriting the file. Extra accounts are SuperGrok bearers stored per account in the Keychain as `grok.oauth-token.<account-id>`. **Import grok login** is available when the file exists and is unused. **Rename** / **Delete** from the same list. Delete removes that Keychain bearer only; `~/.grok/auth.json` is never deleted.
+2. Account metadata (`id`, `label`, `enabled`, optional email, `usesAmbientAuthFile`) and `selectedGrokAccountId` live in `~/.config/quotabar/config.json`.
+3. Existing single-account installs migrate to one account: a leftover Keychain `grok.oauth-token` is copied onto that row, and `grok login` is marked ambient when the file is present. After the per-account secret (or ambient flag) exists, the legacy Keychain key is deleted. An explicit empty `grokAccounts` array is not recreated on launch.
+4. Prefer identity + bearer from `~/.grok/auth.json` **only for the ambient account**. Top-level keys are OIDC scope URLs; QuotaBar prefers `https://auth.x.ai::` (SuperGrok), then `https://accounts.x.ai/sign-in`. Fields used: `key` (bearer), `email`, `expires_at`, `auth_mode`, `team_id`. QuotaBar does **not** refresh or rewrite that file. Other accounts use only their Keychain bearer (JWT email when present).
+5. `GROK_OAUTH_TOKEN` is accepted as an implicit single-account fallback when no Grok accounts have been added yet. `xai-` management keys and cookie-shaped values are rejected on the OAuth field.
+6. Live fetch: `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits` with `Authorization: Bearer <key>`, `x-xai-token-auth: xai-grok-cli`, and `Accept: application/json`.
+7. Used % = `config.creditUsagePercent`, else `onDemandUsed.val / onDemandCap.val * 100`. A parseable current period without those values is **0% used**. Never invent a bar from credits-alone with no period.
+8. Reset = `config.currentPeriod.end`, then `config.billingPeriodEnd`. Window title is Weekly or Monthly from that reset cycle (same classification as ChatGPT), else “Credits”. One real window is enough; empty Session is omitted.
+9. Plan: `GET https://cli-chat-proxy.grok.com/v1/settings` → `subscription_tier_display` (SuperGrok / SuperGrok Heavy), 2s timeout. If that fails, fall back to OIDC SuperGrok / `auth_mode`. Settings never blocks usage. Email / username is taken from `auth.json`, the billing/settings JSON, or the bearer JWT.
+10. The popover lists one card per account. Click a card to select the active account for the menu-bar %. Refresh loads every Grok account concurrently and keeps the last-good snapshot on failure.
 
 ### OpenCode Go
 

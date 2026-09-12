@@ -10,7 +10,7 @@ Power users who already pay for Cursor, ChatGPT, GLM, Grok, and/or OpenCode Go. 
 
 ## Product Purpose
 
-QuotaBar is a menu-bar-only macOS 14+ utility that shows remaining subscription quota. Settings is the credential and preference surface behind that popover: enable providers, store secrets in the Keychain, manage ChatGPT and OpenCode Go accounts, and choose how the menu bar reads. Success is a calm preference window that matches the dark popover, never a second app.
+QuotaBar is a menu-bar-only macOS 14+ utility that shows remaining subscription quota. Settings is the credential and preference surface behind that popover: enable providers, store secrets in the Keychain, manage ChatGPT, Grok, and OpenCode Go accounts, and choose how the menu bar reads. Success is a calm preference window that matches the dark popover, never a second app.
 
 ## Brand Personality
 
@@ -29,7 +29,7 @@ Dense, calm, native. Quiet confidence; no marketing voice. Copy is short, litera
 - **The popover is the product.** Settings is chrome for credentials and toggles, not a dashboard.
 - **One glance, then a drill-in.** Overview first (which providers are on); secrets live one section deep.
 - **Progressive disclosure.** Advanced cookie/JSON stays collapsed. Empty states teach the next action.
-- **Same language as the menu extra.** Cards, rows, secret fields, and SF Symbols must feel like the popover, not a different app.
+- **Same language as the menu extra.** Cards, rows, secret fields, and bundled brand marks must feel like the popover, not a different app.
 - **Persistence is invisible.** Keychain and `~/.config/quotabar/config.json` paths do not change for a visual redesign.
 
 ## Accessibility & Inclusion

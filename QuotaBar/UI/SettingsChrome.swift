@@ -98,11 +98,21 @@ struct SettingsNavItem: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                Image(systemName: section.symbol)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(selected ? Theme.settingsAccent : Theme.settingsSecondary)
-                    .frame(width: 16, alignment: .center)
-                    .accessibilityHidden(true)
+                Group {
+                    if let provider = section.provider {
+                        ProviderMark(
+                            provider: provider,
+                            size: 12,
+                            tint: selected ? Theme.settingsAccent : Theme.settingsSecondary
+                        )
+                    } else {
+                        Image(systemName: section.symbol)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(selected ? Theme.settingsAccent : Theme.settingsSecondary)
+                    }
+                }
+                .frame(width: 16, alignment: .center)
+                .accessibilityHidden(true)
                 Text(section.title)
                     .font(.system(size: 12.5, weight: selected ? .semibold : .medium))
                     .foregroundStyle(selected ? Theme.settingsPrimary : Theme.settingsSecondary)
@@ -497,6 +507,7 @@ struct SettingsIconButton: View {
 }
 
 struct SettingsEmptyState: View {
+    var provider: ProviderKind? = nil
     let symbol: String
     let title: String
     let message: String
@@ -505,15 +516,21 @@ struct SettingsEmptyState: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            Image(systemName: symbol)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Theme.settingsAccentSoft)
-                .frame(width: 36, height: 36)
-                .background(
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(Theme.settingsSelectedFill)
-                )
-                .accessibilityHidden(true)
+            Group {
+                if let provider {
+                    ProviderMark(provider: provider, size: 16, tint: Theme.settingsAccentSoft)
+                } else {
+                    Image(systemName: symbol)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Theme.settingsAccentSoft)
+                }
+            }
+            .frame(width: 36, height: 36)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Theme.settingsSelectedFill)
+            )
+            .accessibilityHidden(true)
             VStack(spacing: 4) {
                 Text(title)
                     .font(.system(size: 13, weight: .semibold))
