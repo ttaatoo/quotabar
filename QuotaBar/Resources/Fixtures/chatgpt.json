@@ -1,6 +1,7 @@
 {
   "plan": "Plus",
   "email": "user@example.com",
+  "subscriptionExpiresAt": "2026-10-15T00:00:00Z",
   "credits": { "balance": 0 },
   "session": {
     "label": "Session",

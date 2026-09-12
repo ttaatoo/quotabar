@@ -16,6 +16,25 @@ enum TimeFormatting {
         return "\(prefix) reset in \(compactDuration(remaining))"
     }
 
+    static func resetChip(until date: Date, now: Date) -> String {
+        let remaining = date.timeIntervalSince(now)
+        if remaining <= 0 { return "pending" }
+        return compactDuration(remaining)
+    }
+
+    static func planExpiryLabel(until date: Date, now: Date) -> String {
+        let remaining = date.timeIntervalSince(now)
+        if remaining <= 0 { return "Ended" }
+        if remaining < 7 * 86_400 {
+            return "Ends in \(compactDuration(remaining))"
+        }
+        return "Ends \(shortDate(date))"
+    }
+
+    static func shortDate(_ date: Date) -> String {
+        shortDateFormatter.string(from: date)
+    }
+
     static func compactDuration(_ interval: TimeInterval) -> String {
         let total = max(0, Int(interval.rounded()))
         let days = total / 86_400
@@ -34,6 +53,13 @@ enum TimeFormatting {
         }
         return "\(max(seconds, 1))s"
     }
+
+    private static let shortDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "d MMM"
+        return formatter
+    }()
 
     static func parseDate(_ raw: Any?) -> Date? {
         if let date = raw as? Date { return date }

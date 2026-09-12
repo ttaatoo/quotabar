@@ -200,6 +200,12 @@ No shadows. Depth is a three-step night stack: rail darker than page, group ligh
 - Soft well + brand mark (or SF Symbol for non-provider empty states), title, one teaching sentence, one primary action
 - Never a lone “No accounts yet.”
 
+### Popover account cards
+- Tight header: brand mark, email, plan badge, active check
+- Each quota window is two rows: title + percent + reset chip, then the bar. Do not bury reset under a third caption
+- Credits and optional plan expiry share one footer row. Omit expiry when the API does not publish it
+- Purple selection ring and tint stay. No nested cards, no side stripe
+
 ### Navigation
 - Three quiet groups: Quota, Accounts, App
 - First open maps to the popover’s selected provider; later visits keep the user’s pane

@@ -52,6 +52,9 @@ enum FixtureLoader {
             monthly.resetAt = now.addingTimeInterval((18 * 86_400) + (6 * 3600))
             snapshot.monthly = monthly
         }
+        if snapshot.planExpiresAt != nil {
+            snapshot.planExpiresAt = now.addingTimeInterval(18 * 86_400)
+        }
         return snapshot
     }
 

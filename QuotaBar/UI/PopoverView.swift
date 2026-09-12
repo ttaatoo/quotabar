@@ -279,24 +279,24 @@ struct AccountCard: View {
     }
 
     private var headerRow: some View {
-        HStack(alignment: .center, spacing: 6) {
+        HStack(alignment: .center, spacing: 5) {
             ProviderMark(
                 provider: provider,
-                size: 11,
+                size: 10,
                 tint: Theme.settingsTint(for: provider)
             )
             Text(title)
-                .font(.system(size: 11.5, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Theme.primary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-            Spacer(minLength: 6)
+            Spacer(minLength: 4)
             if let plan = planName {
                 Text(plan)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 9.5, weight: .semibold))
                     .foregroundStyle(Theme.planBadgeForeground(plan))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
                     .background(
                         Capsule(style: .continuous).fill(Theme.planBadgeFill(plan))
                     )
@@ -305,7 +305,7 @@ struct AccountCard: View {
                 Image(systemName: "checkmark")
                     .font(.system(size: 8, weight: .bold))
                     .foregroundStyle(Theme.logoPurple)
-                    .frame(width: 14, height: 14)
+                    .frame(width: 12, height: 12)
                     .background(Circle().fill(Theme.logoPurple.opacity(0.18)))
                     .accessibilityHidden(true)
             }
@@ -333,12 +333,33 @@ struct AccountCard: View {
                     UsageMeterRow(window: window, mode: mode, now: now, compact: true)
                 }
             }
-            if let extra = snapshot.extraFooter, !extra.isEmpty {
-                Text(extra)
-                    .font(.system(size: 10))
-                    .foregroundStyle(Theme.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+            cardFooter(snapshot)
+        }
+    }
+
+    @ViewBuilder
+    private func cardFooter(_ snapshot: UsageSnapshot) -> some View {
+        let credits = snapshot.extraFooter?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let expiry = snapshot.planExpiresAt.map { TimeFormatting.planExpiryLabel(until: $0, now: now) }
+        if !credits.isEmpty || expiry != nil {
+            HStack(alignment: .center, spacing: 6) {
+                if !credits.isEmpty {
+                    Text(credits)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                if let expiry {
+                    HStack(spacing: 3) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 8, weight: .semibold))
+                        Text(expiry)
+                            .lineLimit(1)
+                    }
+                    .accessibilityLabel(expiry)
+                }
             }
+            .font(.system(size: 9.5, weight: .medium).monospacedDigit())
+            .foregroundStyle(Theme.tertiary)
         }
     }
 
