@@ -4,8 +4,15 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var store: AppStore
 
+    private enum AccountKind {
+        case chatgpt
+        case opencodeGo
+    }
+
+    @State private var renameKind: AccountKind = .chatgpt
     @State private var renameID: UUID?
     @State private var renameLabel = ""
+    @State private var deleteKind: AccountKind = .chatgpt
     @State private var deleteID: UUID?
 
     var body: some View {
@@ -15,6 +22,7 @@ struct SettingsView: View {
                 providersCard
                 cursorCard
                 chatgptCard
+                opencodeGoCard
                 glmCard
                 grokCard
                 displayCard
@@ -44,24 +52,36 @@ struct SettingsView: View {
             TextField("Label", text: $renameLabel)
             Button("Save") {
                 if let renameID = renameID {
-                    store.renameChatGPTAccount(renameID, to: renameLabel)
+                    switch renameKind {
+                    case .chatgpt:
+                        store.renameChatGPTAccount(renameID, to: renameLabel)
+                    case .opencodeGo:
+                        store.renameOpenCodeGoAccount(renameID, to: renameLabel)
+                    }
                 }
             }
             Button("Cancel", role: .cancel) {}
         }
         .confirmationDialog(
-            "Delete this ChatGPT account?",
+            deleteKind == .chatgpt ? "Delete this ChatGPT account?" : "Delete this OpenCode account?",
             isPresented: deletePresented,
             titleVisibility: .visible
         ) {
             Button("Delete", role: .destructive) {
                 if let deleteID = deleteID {
-                    store.deleteChatGPTAccount(deleteID)
+                    switch deleteKind {
+                    case .chatgpt:
+                        store.deleteChatGPTAccount(deleteID)
+                    case .opencodeGo:
+                        store.deleteOpenCodeGoAccount(deleteID)
+                    }
                 }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("The Keychain cookie and JSON for this account are removed. A private Codex home is deleted when it belongs to QuotaBar; ~/.codex/auth.json is never deleted.")
+            Text(deleteKind == .chatgpt
+                 ? "The Keychain cookie and JSON for this account are removed. A private Codex home is deleted when it belongs to QuotaBar; ~/.codex/auth.json is never deleted."
+                 : "The Keychain API key for this OpenCode account is removed. Other accounts stay.")
         }
     }
 
@@ -74,7 +94,7 @@ struct SettingsView: View {
                 Text("QuotaBar")
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(Theme.primary)
-                Text("Remaining quota for Cursor, ChatGPT, GLM, and Grok — in the menu bar.")
+                Text("Remaining quota for Cursor, ChatGPT, GLM, Grok, and OpenCode Go — in the menu bar.")
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -94,7 +114,10 @@ struct SettingsView: View {
             tint: Theme.logoBlue,
             hint: "Turn off a provider to hide it from the popover."
         ) {
-            HStack(spacing: 6) {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 88), spacing: 6)],
+                spacing: 6
+            ) {
                 ForEach(ProviderKind.allCases) { provider in
                     providerChip(provider)
                 }
@@ -157,6 +180,48 @@ struct SettingsView: View {
                             Divider().overlay(Theme.settingsHairline)
                         }
                         accountRow(account)
+                            .padding(.vertical, 10)
+                    }
+                }
+            }
+        }
+    }
+
+    private var opencodeGoCard: some View {
+        SettingsCard(
+            title: "OpenCode Go",
+            symbol: ProviderKind.opencodeGo.settingsSymbol,
+            tint: Theme.settingsTint(for: .opencodeGo),
+            hint: "Paste a Go API key per account. QuotaBar calls GET /zen/go/v1/usage with Bearer only — no cookie jar."
+        ) {
+            Button {
+                _ = store.addOpenCodeGoAccount()
+            } label: {
+                Label("Add account", systemImage: "plus")
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(Theme.primary)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: Theme.settingsHitTarget)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Theme.logoTeal.opacity(0.85))
+                    )
+            }
+            .buttonStyle(.plain)
+
+            if store.settings.opencodeGoAccounts.isEmpty {
+                Text("No accounts yet. Paste a key after adding one, or set OPENCODE_GO_API_KEY.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(store.settings.opencodeGoAccounts.enumerated()), id: \.element.id) { index, account in
+                        if index > 0 {
+                            Divider().overlay(Theme.settingsHairline)
+                        }
+                        opencodeAccountRow(account)
                             .padding(.vertical, 10)
                     }
                 }
@@ -301,11 +366,16 @@ struct SettingsView: View {
                     }
                 }
                 Spacer(minLength: 8)
+                iconButton("arrow.clockwise", help: "Re-login") {
+                    CodexLoginPresenter.shared.beginRelogin(store: store, accountId: account.id)
+                }
                 iconButton("pencil", help: "Rename") {
+                    renameKind = .chatgpt
                     renameID = account.id
                     renameLabel = account.label
                 }
                 iconButton("trash", help: "Delete", destructive: true) {
+                    deleteKind = .chatgpt
                     deleteID = account.id
                 }
             }
@@ -322,6 +392,42 @@ struct SettingsView: View {
             }
             .font(.system(size: 12))
             .foregroundStyle(Theme.secondary)
+        }
+    }
+
+    private func opencodeAccountRow(_ account: OpenCodeGoAccount) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(account.displayTitle)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.primary)
+                        .lineLimit(1)
+                    if let email = account.email,
+                       !email.isEmpty,
+                       account.label.caseInsensitiveCompare(email) != .orderedSame {
+                        Text(account.label)
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 8)
+                iconButton("pencil", help: "Rename") {
+                    renameKind = .opencodeGo
+                    renameID = account.id
+                    renameLabel = account.label
+                }
+                iconButton("trash", help: "Delete", destructive: true) {
+                    deleteKind = .opencodeGo
+                    deleteID = account.id
+                }
+            }
+
+            SettingsSecretField(placeholder: "API key", text: opencodeKeyBinding(account.id))
+            Text("Optional label is enough — the usage API does not always return an email.")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.secondary)
         }
     }
 
@@ -427,6 +533,13 @@ struct SettingsView: View {
         Binding(
             get: { store.chatgptCookies[id, default: ""] },
             set: { store.setChatGPTCookie($0, for: id) }
+        )
+    }
+
+    private func opencodeKeyBinding(_ id: UUID) -> Binding<String> {
+        Binding(
+            get: { store.opencodeGoAPIKeys[id, default: ""] },
+            set: { store.setOpenCodeGoAPIKey($0, for: id) }
         )
     }
 

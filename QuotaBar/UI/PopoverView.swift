@@ -76,9 +76,9 @@ struct PopoverView: View {
                         now: store.now,
                         onRetry: { Task { await store.refreshCard(row.id) } },
                         onOpenSettings: store.openSettings,
-                        isActive: store.selected == .chatgpt && store.isActiveChatGPTCard(row.id),
-                        onActivate: store.selected == .chatgpt
-                            ? { store.activateChatGPTCard(row.id) }
+                        isActive: store.isActiveAccountCard(row.id),
+                        onActivate: (store.selected == .chatgpt || store.selected == .opencodeGo)
+                            ? { store.activateAccountCard(row.id) }
                             : nil,
                         reduceMotion: reduceMotion
                     )
@@ -160,7 +160,7 @@ struct PopoverView: View {
                 updated = "Update failed"
             }
         }
-        if store.selected == .chatgpt, rows.count > 1 {
+        if (store.selected == .chatgpt || store.selected == .opencodeGo), rows.count > 1 {
             return "\(rows.count) accounts · \(updated)"
         }
         return updated
@@ -209,7 +209,7 @@ struct AccountCard: View {
                 signedOutBody(message)
             case .failure(let message):
                 EmptyStateView(
-                    title: "Couldn’t load",
+                    title: (row.hasCredentials || hasKnownEmail) ? "Couldn’t refresh" : "Couldn’t load",
                     message: shortFailure(message),
                     actionTitle: "Retry",
                     action: onRetry,
@@ -291,7 +291,7 @@ struct AccountCard: View {
     }
 
     private func readyBody(_ snapshot: UsageSnapshot) -> some View {
-        let windows = [snapshot.session, snapshot.weekly].compactMap { $0 }
+        let windows = [snapshot.session, snapshot.weekly, snapshot.monthly].compactMap { $0 }
         return VStack(alignment: .leading, spacing: Theme.meterSpacing) {
             if windows.isEmpty {
                 Text("No usage windows")

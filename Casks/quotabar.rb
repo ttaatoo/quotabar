@@ -6,7 +6,7 @@ cask "quotabar" do
 
   url "https://github.com/ttaatoo/quotabar/releases/download/v#{version}/QuotaBar.zip"
   name "QuotaBar"
-  desc "Menu bar quota for Cursor, ChatGPT, GLM, and Grok"
+  desc "Menu bar quota for Cursor, ChatGPT, GLM, Grok, and OpenCode Go"
   homepage "https://github.com/ttaatoo/quotabar"
 
   depends_on macos: :sonoma

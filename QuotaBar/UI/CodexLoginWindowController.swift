@@ -4,8 +4,14 @@ import Foundation
 
 enum CodexLoginOutcome: Equatable {
     case imported(email: String?)
+    case relogged(email: String?)
     case cancelled
     case failed(String)
+}
+
+enum CodexLoginMode: Equatable {
+    case addAccount(usesPrivateHome: Bool)
+    case relogin(accountId: UUID, homePath: String?, usesAmbient: Bool)
 }
 
 @MainActor
@@ -20,12 +26,28 @@ final class CodexLoginPresenter {
             presentImportedNotice(email: email)
             return
         }
+        start(mode: .addAccount(usesPrivateHome: store.hasAmbientCodexAccount))
+    }
+
+    func beginRelogin(store: AppStore, accountId: UUID) {
+        guard let account = store.settings.chatgptAccounts.first(where: { $0.id == accountId }) else {
+            return
+        }
+        start(
+            mode: .relogin(
+                accountId: accountId,
+                homePath: account.codexHomePath,
+                usesAmbient: account.usesAmbientCodexHome
+            )
+        )
+    }
+
+    private func start(mode: CodexLoginMode) {
         if let controller, controller.isVisible {
             controller.show()
             return
         }
-        let usesPrivateHome = store.hasAmbientCodexAccount
-        let controller = CodexLoginWindowController(usesPrivateHome: usesPrivateHome) { [weak self] source, result in
+        let controller = CodexLoginWindowController(mode: mode) { [weak self] source, result in
             Task { @MainActor [self, source] in
                 self?.handle(result, from: source)
             }
@@ -44,11 +66,13 @@ final class CodexLoginPresenter {
         switch result {
         case .imported(let email):
             presentImportedNotice(email: email)
+        case .relogged(let email):
+            presentReloggedNotice(email: email)
         case .cancelled:
             break
         case .failed(let message):
             let alert = NSAlert()
-            alert.messageText = "Couldn’t add ChatGPT account"
+            alert.messageText = "Couldn’t finish ChatGPT sign-in"
             alert.informativeText = message
             alert.alertStyle = .warning
             alert.addButton(withTitle: "OK")
@@ -68,16 +92,30 @@ final class CodexLoginPresenter {
         alert.addButton(withTitle: "OK")
         alert.runModal()
     }
+
+    private func presentReloggedNotice(email: String?) {
+        let alert = NSAlert()
+        alert.messageText = "ChatGPT account re-logged"
+        if let email, !email.isEmpty {
+            alert.informativeText = "Updated \(email). Other ChatGPT accounts were not changed."
+        } else {
+            alert.informativeText = "Updated this account’s Codex home. Other ChatGPT accounts were not changed."
+        }
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
 }
 
 /// Runs `codex login` (system browser). Does not embed a web view and never writes auth.json.
 @MainActor
 final class CodexLoginWindowController: NSWindowController, NSWindowDelegate {
     private let onFinish: (CodexLoginWindowController, CodexLoginOutcome) -> Void
-    private let usesPrivateHome: Bool
+    private let mode: CodexLoginMode
     private var pendingResult: CodexLoginOutcome?
     private var didTeardown = false
     private let session = CodexLoginSession()
+    private var createdHomeThisSession: URL?
 
     private var statusField: NSTextField!
     private var detailField: NSTextField!
@@ -87,10 +125,10 @@ final class CodexLoginWindowController: NSWindowController, NSWindowDelegate {
     var isVisible: Bool { window?.isVisible == true }
 
     init(
-        usesPrivateHome: Bool,
+        mode: CodexLoginMode,
         onFinish: @escaping (CodexLoginWindowController, CodexLoginOutcome) -> Void
     ) {
-        self.usesPrivateHome = usesPrivateHome
+        self.mode = mode
         self.onFinish = onFinish
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 420, height: 168),
@@ -98,7 +136,12 @@ final class CodexLoginWindowController: NSWindowController, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "Add ChatGPT account"
+        switch mode {
+        case .addAccount:
+            window.title = "Add ChatGPT account"
+        case .relogin:
+            window.title = "Re-login ChatGPT account"
+        }
         window.isReleasedWhenClosed = false
         window.level = .floating
         super.init(window: window)
@@ -140,7 +183,14 @@ final class CodexLoginWindowController: NSWindowController, NSWindowDelegate {
         statusField.font = .systemFont(ofSize: 13, weight: .semibold)
         statusField.translatesAutoresizingMaskIntoConstraints = false
 
-        detailField = NSTextField(wrappingLabelWithString: "QuotaBar is running `codex login` so the Codex CLI can open your default browser. Tokens stay in that Codex home — QuotaBar only reads them.")
+        let detail: String
+        switch mode {
+        case .addAccount:
+            detail = "QuotaBar is running `codex login` so the Codex CLI can open your default browser. Tokens stay in that Codex home."
+        case .relogin:
+            detail = "Re-logging only this account. Other ChatGPT accounts and their Codex homes are left alone."
+        }
+        detailField = NSTextField(wrappingLabelWithString: detail)
         detailField.font = .systemFont(ofSize: 11)
         detailField.textColor = .secondaryLabelColor
         detailField.translatesAutoresizingMaskIntoConstraints = false
@@ -176,78 +226,101 @@ final class CodexLoginWindowController: NSWindowController, NSWindowDelegate {
 
     private func startLogin() {
         setBusy(true, status: "Finish sign-in in your browser…")
-        let privateHome: URL?
-        if usesPrivateHome {
-            let home = CodexCLIAuth.makeManagedHomeURL()
-            do {
-                try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-            } catch {
-                finish(.failed("Couldn’t create a private Codex home for this account."))
-                return
+        let homePath: String?
+        switch mode {
+        case .addAccount(let usesPrivateHome):
+            if usesPrivateHome {
+                let home = CodexCLIAuth.makeManagedHomeURL()
+                do {
+                    try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+                } catch {
+                    finish(.failed("Couldn’t create a private Codex home for this account."))
+                    return
+                }
+                createdHomeThisSession = home
+                homePath = home.path
+            } else {
+                homePath = nil
             }
-            privateHome = home
-        } else {
-            privateHome = nil
+        case .relogin(_, let existingPath, let usesAmbient):
+            if let existing = CodexCLIAuth.homeURL(path: existingPath) {
+                homePath = existing.path(percentEncoded: false)
+            } else if usesAmbient {
+                homePath = CodexCLIAuth.defaultHomeURL().path(percentEncoded: false)
+            } else {
+                let home = CodexCLIAuth.makeManagedHomeURL()
+                do {
+                    try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+                } catch {
+                    finish(.failed("Couldn’t create a private Codex home for this account."))
+                    return
+                }
+                createdHomeThisSession = home
+                homePath = home.path
+            }
         }
 
         Task { @MainActor [self] in
-            let result = await session.run(homePath: privateHome?.path)
-            self.handleSessionResult(result, privateHome: privateHome)
+            let result = await session.run(homePath: homePath)
+            self.handleSessionResult(result, homePath: homePath)
         }
     }
 
-    private func handleSessionResult(_ result: CodexLoginSession.Result, privateHome: URL?) {
+    private func handleSessionResult(_ result: CodexLoginSession.Result, homePath: String?) {
         switch result.outcome {
         case .success:
-            let home = privateHome ?? CodexCLIAuth.defaultHomeURL()
+            let home = CodexCLIAuth.homeURL(path: homePath) ?? CodexCLIAuth.defaultHomeURL()
             guard let tokens = CodexCLIAuth.read(home: home) else {
-                if let privateHome {
-                    CodexCLIAuth.removeManagedHomeIfSafe(privateHome.path)
-                }
+                discardCreatedHomeIfNeeded()
                 finish(.failed("codex login finished, but no readable auth.json was in that Codex home. QuotaBar does not write tokens."))
                 return
             }
-            let id = AppStore.shared.upsertChatGPTAccountFromCodexHome(
-                homePath: home.path,
-                email: tokens.email,
-                ambient: privateHome == nil
-            )
-            if id == nil {
-                if let privateHome {
-                    CodexCLIAuth.removeManagedHomeIfSafe(privateHome.path)
+            switch mode {
+            case .addAccount:
+                let id = AppStore.shared.upsertChatGPTAccountFromCodexHome(
+                    homePath: home.path,
+                    email: tokens.email,
+                    ambient: createdHomeThisSession == nil && CodexCLIAuth.isAmbientHome(home)
+                )
+                if id == nil {
+                    discardCreatedHomeIfNeeded()
+                    finish(.failed("Signed in, but QuotaBar could not add the account."))
+                    return
                 }
-                finish(.failed("Signed in, but QuotaBar could not add the account."))
-                return
+                finish(.imported(email: tokens.email))
+            case .relogin(let accountId, _, let usesAmbient):
+                AppStore.shared.applyChatGPTRelogin(
+                    accountId: accountId,
+                    homePath: home.path,
+                    email: tokens.email,
+                    ambient: usesAmbient || CodexCLIAuth.isAmbientHome(home)
+                )
+                finish(.relogged(email: tokens.email))
             }
-            finish(.imported(email: tokens.email))
         case .cancelled:
-            if let privateHome {
-                CodexCLIAuth.removeManagedHomeIfSafe(privateHome.path)
-            }
+            discardCreatedHomeIfNeeded()
             finish(.cancelled)
         case .missingBinary:
-            if let privateHome {
-                CodexCLIAuth.removeManagedHomeIfSafe(privateHome.path)
-            }
+            discardCreatedHomeIfNeeded()
             finish(.failed("Codex CLI was not found. Install it (`npm i -g @openai/codex` or the ChatGPT desktop app), then run `codex login` in Terminal or try Add account again. Cookie paste remains under Advanced."))
         case .timedOut:
-            if let privateHome {
-                CodexCLIAuth.removeManagedHomeIfSafe(privateHome.path)
-            }
+            discardCreatedHomeIfNeeded()
             finish(.failed("codex login timed out before the browser session finished."))
         case .launchFailed(let message):
-            if let privateHome {
-                CodexCLIAuth.removeManagedHomeIfSafe(privateHome.path)
-            }
+            discardCreatedHomeIfNeeded()
             finish(.failed(message))
         case .failed(let status, let output):
-            if let privateHome {
-                CodexCLIAuth.removeManagedHomeIfSafe(privateHome.path)
-            }
+            discardCreatedHomeIfNeeded()
             let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
             let suffix = trimmed.isEmpty ? "" : "\n\n\(trimmed.prefix(600))"
             finish(.failed("codex login exited with status \(status).\(suffix)"))
         }
+    }
+
+    private func discardCreatedHomeIfNeeded() {
+        guard let created = createdHomeThisSession else { return }
+        CodexCLIAuth.removeManagedHomeIfSafe(created.path)
+        createdHomeThisSession = nil
     }
 
     @objc private func cancelTapped() {
@@ -270,6 +343,9 @@ final class CodexLoginWindowController: NSWindowController, NSWindowDelegate {
         pendingResult = result
         if case .imported = result {
             setBusy(true, status: "Signed in. Adding account…")
+        }
+        if case .relogged = result {
+            setBusy(true, status: "Signed in. Updating account…")
         }
         window?.close()
     }

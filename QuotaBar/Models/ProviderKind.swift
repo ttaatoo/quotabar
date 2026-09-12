@@ -5,6 +5,7 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable, Hashable {
     case chatgpt
     case glm
     case grok
+    case opencodeGo
 
     var id: String { rawValue }
 
@@ -14,16 +15,23 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable, Hashable {
         case .chatgpt: return "ChatGPT"
         case .glm: return "GLM"
         case .grok: return "Grok"
+        case .opencodeGo: return "OpenCode"
         }
     }
 
-    var shortTitle: String { title }
+    /// Compact pill label. Five providers must still fit the frozen popover row.
+    var shortTitle: String {
+        switch self {
+        case .opencodeGo: return "Go"
+        default: return title
+        }
+    }
 
     /// Reserved popover slot 1 when that window is absent.
     var primaryWindowTitle: String {
         switch self {
         case .cursor: return "Cursor Models"
-        case .chatgpt, .glm, .grok: return "Session"
+        case .chatgpt, .glm, .grok, .opencodeGo: return "Session"
         }
     }
 
@@ -31,7 +39,7 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable, Hashable {
     var secondaryWindowTitle: String {
         switch self {
         case .cursor: return "Other Models"
-        case .chatgpt, .glm: return "Weekly"
+        case .chatgpt, .glm, .opencodeGo: return "Weekly"
         case .grok: return "Credits"
         }
     }
@@ -42,6 +50,7 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable, Hashable {
         case .chatgpt: return "text.bubble"
         case .glm: return "hexagon"
         case .grok: return "sparkles"
+        case .opencodeGo: return "terminal"
         }
     }
 
@@ -55,6 +64,8 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable, Hashable {
             return "Paste a z.ai / BigModel API key in Settings, or set Z_AI_API_KEY."
         case .grok:
             return GrokAuth.signInHint
+        case .opencodeGo:
+            return "Add an OpenCode Go API key in Settings."
         }
     }
 }

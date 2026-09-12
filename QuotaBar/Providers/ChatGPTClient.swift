@@ -69,7 +69,7 @@ enum ChatGPTClient {
                 }
             } catch let error as QuotaError where error.isAuthFailure {
                 cookieUnauthorized = true
-                lastError = error
+                lastError = cookieSessionAuthError(error)
             } catch {
                 lastError = error
             }
@@ -77,31 +77,35 @@ enum ChatGPTClient {
 
         if scopedHome != nil, cookie == nil || cookieUnauthorized || cookieIdentity == nil {
             triedCodexAuth = true
-            if let tokens = CodexCLIAuth.read(home: scopedHome) {
+            do {
+                let tokens = try await CodexCLIAuth.resolve(home: scopedHome)
                 if !identitiesMatch(tokens.email, expectedEmail) {
                     lastError = QuotaError.schema(
                         "Codex auth.json belongs to \(tokens.email ?? "another account"), not \(expectedEmail ?? "this account")."
                     )
                 } else {
-                    codexTokens = tokens
-                    do {
-                        if let snapshot = try await requestWhamUsage(
-                            accessToken: tokens.accessToken,
-                            cookie: nil,
-                            accountId: tokens.accountId,
-                            email: tokens.email ?? cookieIdentity?.email,
-                            planName: tokens.planName ?? cookieIdentity?.planName,
-                            now: now
-                        ) {
-                            return try validatedSnapshot(snapshot, expectedEmail: expectedEmail)
-                        }
+                    let used = try await fetchWithCodexTokens(
+                        tokens,
+                        home: scopedHome,
+                        cookieIdentity: cookieIdentity,
+                        expectedEmail: expectedEmail,
+                        now: now
+                    )
+                    switch used {
+                    case .snapshot(let snapshot):
+                        return snapshot
+                    case .emptyJSON:
+                        codexTokens = tokens
                         gotJSONWithoutWindows = true
-                    } catch let error as QuotaError where error.isAuthFailure {
-                        lastError = error
-                    } catch {
+                    case .failed(let error, let attempted):
+                        codexTokens = attempted
                         lastError = error
                     }
                 }
+            } catch let error as QuotaError {
+                lastError = error
+            } catch {
+                lastError = error
             }
         }
 
@@ -153,7 +157,12 @@ enum ChatGPTClient {
         }
 
         if let lastError, !gotJSONWithoutWindows {
-            throw lastError
+            throw annotateAuthFailure(
+                lastError,
+                hadCookie: cookie != nil,
+                triedCodex: triedCodexAuth,
+                hadCodexTokens: codexTokens != nil
+            )
         }
 
         let who = fallbackEmail.map { " as \($0)" } ?? ""
@@ -271,6 +280,11 @@ enum ChatGPTClient {
                 "Origin": "https://chatgpt.com"
             ]
         )
+        if response.statusCode == 401 || response.statusCode == 403 {
+            throw QuotaError.unauthorized(
+                "chatgpt.com rejected the session cookie (\(response.statusCode)). Paste a fresh cookie under Advanced, or Re-login this account in Settings. Other accounts stay."
+            )
+        }
         try HTTPClient.requireOK(response, data: data, host: "chatgpt.com")
         let object = try JSONWalk.object(from: data)
         guard let accessToken = object["accessToken"] as? String, !accessToken.isEmpty else {
@@ -343,7 +357,7 @@ enum ChatGPTClient {
     // MARK: - Live usage
 
     /// Returns a snapshot when `wham/usage` includes usable rate-limit windows.
-    /// 401/403 throw. 200/404 without percentages return `nil` so callers can fall back.
+    /// 401/403 throw after header variants. 200/404 without percentages return `nil`.
     private static func requestWhamUsage(
         accessToken: String,
         cookie: String?,
@@ -354,41 +368,52 @@ enum ChatGPTClient {
     ) async throws -> UsageSnapshot? {
         var lastError: Error?
         var sawJSONWithoutWindows = false
+        var lastAuthStatus: Int?
 
-        for urlString in whamURLs {
-            guard let url = URL(string: urlString) else { continue }
-            do {
-                let (data, response) = try await HTTPClient.get(
-                    url: url,
-                    headers: bearerHeaders(accessToken, cookie: cookie, accountId: accountId)
-                )
-                if response.statusCode == 401 || response.statusCode == 403 {
-                    throw QuotaError.unauthorized(
-                        "\(url.host ?? "chatgpt.com") rejected the session (\(response.statusCode))."
+        for attempt in authHeaderAttempts(cookie: cookie, accountId: accountId) {
+            for urlString in whamURLs {
+                guard let url = URL(string: urlString) else { continue }
+                do {
+                    let (data, response) = try await HTTPClient.get(
+                        url: url,
+                        headers: bearerHeaders(
+                            accessToken,
+                            cookie: attempt.cookie,
+                            accountId: attempt.accountId
+                        )
                     )
+                    if response.statusCode == 401 || response.statusCode == 403 {
+                        lastAuthStatus = response.statusCode
+                        lastError = usageAuthError(host: url.host ?? "chatgpt.com", status: response.statusCode)
+                        continue
+                    }
+                    if response.statusCode == 404 { continue }
+                    try HTTPClient.requireOK(response, data: data, host: url.host ?? "chatgpt.com")
+                    let object = try JSONWalk.object(from: data)
+                    if let snapshot = parseWhamUsage(
+                        object,
+                        email: email,
+                        fallbackPlan: planName,
+                        fetchedAt: now,
+                        source: .live
+                    ) {
+                        return snapshot
+                    }
+                    sawJSONWithoutWindows = true
+                } catch let error as QuotaError where error.isAuthFailure {
+                    lastAuthStatus = lastAuthStatus ?? 401
+                    lastError = error
+                } catch {
+                    lastError = error
                 }
-                if response.statusCode == 404 { continue }
-                try HTTPClient.requireOK(response, data: data, host: url.host ?? "chatgpt.com")
-                let object = try JSONWalk.object(from: data)
-                if let snapshot = parseWhamUsage(
-                    object,
-                    email: email,
-                    fallbackPlan: planName,
-                    fetchedAt: now,
-                    source: .live
-                ) {
-                    return snapshot
-                }
-                sawJSONWithoutWindows = true
-            } catch let error as QuotaError where error.isAuthFailure {
-                throw error
-            } catch {
-                lastError = error
             }
         }
 
         if sawJSONWithoutWindows {
             return nil
+        }
+        if lastAuthStatus != nil, let lastError {
+            throw lastError
         }
         if let lastError {
             throw lastError
@@ -407,26 +432,36 @@ enum ChatGPTClient {
         var lastError: Error?
         var sawJSONWithoutWindows = false
 
-        for urlString in conversationLimitURLs {
-            guard let url = URL(string: urlString) else { continue }
-            do {
-                let (data, response) = try await HTTPClient.get(
-                    url: url,
-                    headers: bearerHeaders(accessToken, cookie: cookie, accountId: accountId)
-                )
-                if response.statusCode == 404 { continue }
-                try HTTPClient.requireOK(response, data: data, host: url.host ?? "chatgpt.com")
-                let object = try JSONWalk.object(from: data)
-                if var snapshot = parseUsageObject(object, planName: planName, fetchedAt: now, source: .live) {
-                    snapshot.accountEmail = email ?? CodexCLIAuth.email(from: object) ?? snapshot.accountEmail
-                    return snapshot
+        for attempt in authHeaderAttempts(cookie: cookie, accountId: accountId) {
+            for urlString in conversationLimitURLs {
+                guard let url = URL(string: urlString) else { continue }
+                do {
+                    let (data, response) = try await HTTPClient.get(
+                        url: url,
+                        headers: bearerHeaders(
+                            accessToken,
+                            cookie: attempt.cookie,
+                            accountId: attempt.accountId
+                        )
+                    )
+                    if response.statusCode == 401 || response.statusCode == 403 {
+                        lastError = usageAuthError(host: url.host ?? "chatgpt.com", status: response.statusCode)
+                        continue
+                    }
+                    if response.statusCode == 404 { continue }
+                    try HTTPClient.requireOK(response, data: data, host: url.host ?? "chatgpt.com")
+                    let object = try JSONWalk.object(from: data)
+                    if var snapshot = parseUsageObject(object, planName: planName, fetchedAt: now, source: .live) {
+                        snapshot.accountEmail = email ?? CodexCLIAuth.email(from: object) ?? snapshot.accountEmail
+                        return snapshot
+                    }
+                    sawJSONWithoutWindows = true
+                    lastError = QuotaError.noUsableQuota(
+                        "ChatGPT \(url.lastPathComponent) returned JSON without remaining/used percentages."
+                    )
+                } catch {
+                    lastError = error
                 }
-                sawJSONWithoutWindows = true
-                lastError = QuotaError.noUsableQuota(
-                    "ChatGPT \(url.lastPathComponent) returned JSON without remaining/used percentages."
-                )
-            } catch {
-                lastError = error
             }
         }
 
@@ -774,6 +809,134 @@ enum ChatGPTClient {
             resetAt: candidate.resetAt,
             extra: candidate.extra
         )
+    }
+
+    // MARK: - Codex + header recovery
+
+    private enum CodexUsageResult {
+        case snapshot(UsageSnapshot)
+        case emptyJSON
+        case failed(Error, attempted: CodexCLIAuth.Tokens)
+    }
+
+    private static func fetchWithCodexTokens(
+        _ tokens: CodexCLIAuth.Tokens,
+        home: URL?,
+        cookieIdentity: Identity?,
+        expectedEmail: String?,
+        now: Date
+    ) async throws -> CodexUsageResult {
+        var current = tokens
+        do {
+            if let snapshot = try await requestWhamUsage(
+                accessToken: current.accessToken,
+                cookie: nil,
+                accountId: current.accountId,
+                email: current.email ?? cookieIdentity?.email,
+                planName: current.planName ?? cookieIdentity?.planName,
+                now: now
+            ) {
+                return .snapshot(try validatedSnapshot(snapshot, expectedEmail: expectedEmail))
+            }
+            return .emptyJSON
+        } catch let error as QuotaError where error.isAuthFailure {
+            do {
+                current = try await CodexCLIAuth.resolve(home: home, forceRefresh: true)
+            } catch {
+                return .failed(error, attempted: tokens)
+            }
+            guard identitiesMatch(current.email, expectedEmail) else {
+                return .failed(
+                    QuotaError.schema(
+                        "Codex auth.json belongs to \(current.email ?? "another account"), not \(expectedEmail ?? "this account")."
+                    ),
+                    attempted: current
+                )
+            }
+            do {
+                if let snapshot = try await requestWhamUsage(
+                    accessToken: current.accessToken,
+                    cookie: nil,
+                    accountId: current.accountId,
+                    email: current.email ?? cookieIdentity?.email,
+                    planName: current.planName ?? cookieIdentity?.planName,
+                    now: now
+                ) {
+                    return .snapshot(try validatedSnapshot(snapshot, expectedEmail: expectedEmail))
+                }
+                return .emptyJSON
+            } catch {
+                return .failed(error, attempted: current)
+            }
+        } catch {
+            return .failed(error, attempted: current)
+        }
+    }
+
+    /// Cookie + ChatGPT-Account-Id first, then drop the fields that commonly 401 a second account.
+    private static func authHeaderAttempts(
+        cookie: String?,
+        accountId: String?
+    ) -> [(cookie: String?, accountId: String?)] {
+        var seen = Set<String>()
+        var attempts: [(cookie: String?, accountId: String?)] = []
+        func append(_ cookie: String?, _ accountId: String?) {
+            let key = "\(cookie ?? "")|\(accountId ?? "")"
+            if seen.contains(key) { return }
+            seen.insert(key)
+            attempts.append((cookie, accountId))
+        }
+        append(cookie, accountId)
+        if accountId != nil {
+            append(cookie, nil)
+        }
+        if cookie != nil {
+            append(nil, accountId)
+            append(nil, nil)
+        }
+        return attempts
+    }
+
+    private static func usageAuthError(host: String, status: Int) -> QuotaError {
+        QuotaError.unauthorized(
+            "Couldn't refresh ChatGPT usage from \(host) (\(status)). Retry, or Re-login this account in Settings if the Codex session expired. Other accounts stay."
+        )
+    }
+
+    private static func cookieSessionAuthError(_ error: QuotaError) -> QuotaError {
+        if case .unauthorized(let message) = error, message.contains("session cookie") {
+            return error
+        }
+        return QuotaError.unauthorized(
+            "chatgpt.com rejected the session cookie. Paste a fresh cookie under Advanced, or Re-login this account in Settings. Other accounts stay."
+        )
+    }
+
+    private static func annotateAuthFailure(
+        _ error: Error,
+        hadCookie: Bool,
+        triedCodex: Bool,
+        hadCodexTokens: Bool
+    ) -> Error {
+        guard let quota = error as? QuotaError, quota.isAuthFailure else {
+            return error
+        }
+        if case .unauthorized(let message) = quota {
+            if message.contains("Re-login") || message.contains("expired") || message.contains("session cookie") {
+                return quota
+            }
+        }
+        if triedCodex && !hadCodexTokens {
+            return QuotaError.unauthorized(
+                "Couldn't refresh this ChatGPT account. No readable Codex auth.json was found. Re-login this account in Settings, or paste a session cookie under Advanced. Other accounts stay."
+            )
+        }
+        if hadCookie || hadCodexTokens {
+            return QuotaError.unauthorized(
+                "Couldn't refresh this ChatGPT account (401). Retry, or Re-login this account in Settings if the cookie or Codex session expired. Other accounts stay."
+            )
+        }
+        return quota
     }
 
     // MARK: - Identity helpers

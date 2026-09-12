@@ -57,6 +57,52 @@ struct ChatGPTAccount: Equatable, Codable, Identifiable, Hashable {
     }
 }
 
+struct OpenCodeGoAccount: Equatable, Codable, Identifiable, Hashable {
+    var id: UUID
+    var label: String
+    var enabled: Bool
+    var email: String?
+
+    init(
+        id: UUID = UUID(),
+        label: String,
+        enabled: Bool = true,
+        email: String? = nil
+    ) {
+        self.id = id
+        self.label = label
+        self.enabled = enabled
+        self.email = email
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, label, enabled, email
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        label = try container.decode(String.self, forKey: .label)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        email = try container.decodeIfPresent(String.self, forKey: .email)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(label, forKey: .label)
+        try container.encode(enabled, forKey: .enabled)
+        try container.encodeIfPresent(email, forKey: .email)
+    }
+
+    var displayTitle: String {
+        if let email, !email.isEmpty {
+            return email
+        }
+        return label
+    }
+}
+
 struct AppSettings: Equatable, Codable {
     var enabledProviders: [ProviderKind]
     var selectedProvider: ProviderKind
@@ -70,6 +116,11 @@ struct AppSettings: Equatable, Codable {
     var selectedChatGPTAccountId: UUID?
     /// One-shot so existing 0.0.6 configs gain Grok without re-enabling it after the user hides it.
     var didIntroduceGrok: Bool
+    var opencodeGoAccounts: [OpenCodeGoAccount]
+    /// OpenCode Go account whose remaining % is shown in the menu bar.
+    var selectedOpenCodeGoAccountId: UUID?
+    /// One-shot so existing 0.0.12 configs gain OpenCode Go without re-enabling it after the user hides it.
+    var didIntroduceOpenCodeGo: Bool
 
     static let `default` = AppSettings(
         enabledProviders: ProviderKind.allCases,
@@ -81,7 +132,10 @@ struct AppSettings: Equatable, Codable {
         launchAtLogin: false,
         chatgptAccounts: [],
         selectedChatGPTAccountId: nil,
-        didIntroduceGrok: true
+        didIntroduceGrok: true,
+        opencodeGoAccounts: [],
+        selectedOpenCodeGoAccountId: nil,
+        didIntroduceOpenCodeGo: true
     )
 
     var visibleProviders: [ProviderKind] {
@@ -92,6 +146,11 @@ struct AppSettings: Equatable, Codable {
     var visibleChatGPTAccounts: [ChatGPTAccount] {
         let enabled = chatgptAccounts.filter(\.enabled)
         return enabled.isEmpty ? chatgptAccounts : enabled
+    }
+
+    var visibleOpenCodeGoAccounts: [OpenCodeGoAccount] {
+        let enabled = opencodeGoAccounts.filter(\.enabled)
+        return enabled.isEmpty ? opencodeGoAccounts : enabled
     }
 
     mutating func sanitize() {
@@ -105,6 +164,12 @@ struct AppSettings: Equatable, Codable {
                 enabledProviders.append(.grok)
             }
             didIntroduceGrok = true
+        }
+        if !didIntroduceOpenCodeGo {
+            if !enabledProviders.contains(.opencodeGo) {
+                enabledProviders.append(.opencodeGo)
+            }
+            didIntroduceOpenCodeGo = true
         }
         if !enabledProviders.contains(selectedProvider) {
             selectedProvider = enabledProviders.first ?? .cursor
@@ -131,7 +196,26 @@ struct AppSettings: Equatable, Codable {
             }
         }
 
+        var seenOpenCode = Set<UUID>()
+        opencodeGoAccounts = opencodeGoAccounts.filter { account in
+            if seenOpenCode.contains(account.id) { return false }
+            seenOpenCode.insert(account.id)
+            return true
+        }
+        for index in opencodeGoAccounts.indices {
+            let trimmed = opencodeGoAccounts[index].label.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                opencodeGoAccounts[index].label = "OpenCode"
+            } else {
+                opencodeGoAccounts[index].label = trimmed
+            }
+            if let email = opencodeGoAccounts[index].email?.trimmingCharacters(in: .whitespacesAndNewlines), email.isEmpty {
+                opencodeGoAccounts[index].email = nil
+            }
+        }
+
         resolveSelectedChatGPTAccount()
+        resolveSelectedOpenCodeGoAccount()
     }
 
     /// Keeps `selectedChatGPTAccountId` on a still-visible account.
@@ -147,5 +231,17 @@ struct AppSettings: Equatable, Codable {
             return
         }
         selectedChatGPTAccountId = selectable.first?.id
+    }
+
+    mutating func resolveSelectedOpenCodeGoAccount(preferring preferred: [UUID] = []) {
+        let selectable = visibleOpenCodeGoAccounts
+        if let selected = selectedOpenCodeGoAccountId, selectable.contains(where: { $0.id == selected }) {
+            return
+        }
+        if let match = selectable.first(where: { preferred.contains($0.id) }) {
+            selectedOpenCodeGoAccountId = match.id
+            return
+        }
+        selectedOpenCodeGoAccountId = selectable.first?.id
     }
 }
