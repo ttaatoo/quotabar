@@ -478,7 +478,7 @@ struct SettingsView: View {
     private func chatgptAccountRow(_ account: ChatGPTAccount) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 10) {
-                SettingsProviderWell(provider: .chatgpt, size: 22, iconSize: 11)
+                SettingsProviderWell(provider: .chatgpt, size: 22, iconSize: 13)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(account.displayTitle)
                         .font(.system(size: 13, weight: .medium))
@@ -541,7 +541,7 @@ struct SettingsView: View {
     private func opencodeAccountRow(_ account: OpenCodeGoAccount) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 10) {
-                SettingsProviderWell(provider: .opencodeGo, size: 22, iconSize: 11)
+                SettingsProviderWell(provider: .opencodeGo, size: 22, iconSize: 13)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(account.displayTitle)
                         .font(.system(size: 13, weight: .medium))
@@ -586,7 +586,7 @@ struct SettingsView: View {
     private func grokAccountRow(_ account: GrokAccount) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 10) {
-                SettingsProviderWell(provider: .grok, size: 22, iconSize: 11)
+                SettingsProviderWell(provider: .grok, size: 22, iconSize: 13)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(account.displayTitle)
                         .font(.system(size: 13, weight: .medium))

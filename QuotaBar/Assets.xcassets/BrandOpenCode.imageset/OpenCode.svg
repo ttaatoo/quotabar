@@ -1,4 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-  <path fill="#FFFFFF" d="M3.4 3.2L8.6 8 3.4 12.8l1.15 1.25L11 8 4.55 1.95z"/>
-  <rect fill="#FFFFFF" x="7.2" y="12.15" width="5.7" height="1.65" rx="0.7"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300" fill="none">
+  <!-- Official OpenCode square O (dark). Source: https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/console/app/src/asset/brand/opencode-logo-dark-square.svg -->
+  <g transform="translate(30, 0)">
+    <path d="M180 240H60V120H180V240Z" fill="#4B4646"/>
+    <path fill-rule="evenodd" d="M180 60H60V240H180V60ZM240 300H0V0H240V300Z" fill="#F1ECEC"/>
+  </g>
 </svg>

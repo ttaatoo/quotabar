@@ -102,7 +102,7 @@ struct SettingsNavItem: View {
                     if let provider = section.provider {
                         ProviderMark(
                             provider: provider,
-                            size: 12,
+                            size: 14,
                             tint: selected ? Theme.settingsAccent : Theme.settingsSecondary
                         )
                     } else {

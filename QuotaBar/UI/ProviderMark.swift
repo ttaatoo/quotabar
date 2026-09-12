@@ -1,7 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Bundled template brand mark. Falls back to the SF Symbol if the asset is missing.
+/// Bundled official brand mark. Falls back to the SF Symbol if the asset is missing.
+/// Marks render in original colors (light-on-dark kit variants). Tint applies only to the fallback.
 struct ProviderMark: View {
     let provider: ProviderKind
     var size: CGFloat = 12
@@ -12,10 +13,9 @@ struct ProviderMark: View {
             if NSImage(named: provider.brandAssetName) != nil {
                 Image(provider.brandAssetName)
                     .resizable()
-                    .renderingMode(.template)
+                    .renderingMode(.original)
                     .interpolation(.high)
                     .scaledToFit()
-                    .foregroundStyle(tint)
                     .frame(width: size, height: size)
             } else {
                 Image(systemName: provider.settingsSymbol)
@@ -32,7 +32,7 @@ struct ProviderMark: View {
 struct SettingsProviderWell: View {
     let provider: ProviderKind
     var size: CGFloat = 26
-    var iconSize: CGFloat = 12
+    var iconSize: CGFloat = 14
 
     var body: some View {
         let tint = Theme.settingsTint(for: provider)

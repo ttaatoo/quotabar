@@ -33,7 +33,7 @@ struct PopoverView: View {
                 HStack(spacing: 6) {
                     ProviderMark(
                         provider: store.selected,
-                        size: 12,
+                        size: 14,
                         tint: Theme.settingsTint(for: store.selected)
                     )
                     Text(store.selected.title)
@@ -282,7 +282,7 @@ struct AccountCard: View {
         HStack(alignment: .center, spacing: 5) {
             ProviderMark(
                 provider: provider,
-                size: 10,
+                size: 12,
                 tint: Theme.settingsTint(for: provider)
             )
             Text(title)
