@@ -80,7 +80,8 @@ struct PopoverView: View {
                         onActivate: (store.selected == .chatgpt || store.selected == .opencodeGo)
                             ? { store.activateAccountCard(row.id) }
                             : nil,
-                        reduceMotion: reduceMotion
+                        reduceMotion: reduceMotion,
+                        treatIdleAsUpdating: store.isRefreshing
                     )
                 }
             }
@@ -152,8 +153,10 @@ struct PopoverView: View {
             switch store.selectedState {
             case .ready(let snapshot):
                 updated = updatedText(from: snapshot)
-            case .loading, .idle:
+            case .loading:
                 updated = "Updating…"
+            case .idle:
+                updated = store.isRefreshing ? "Updating…" : "Waiting…"
             case .signedOut:
                 updated = "Not signed in"
             case .failure:
@@ -184,6 +187,7 @@ struct AccountCard: View {
     var isActive: Bool = false
     var onActivate: (() -> Void)? = nil
     var reduceMotion: Bool = false
+    var treatIdleAsUpdating: Bool = true
 
     @State private var hovering = false
 
@@ -198,13 +202,19 @@ struct AccountCard: View {
                 readyBody(snapshot)
                     .contentShape(Rectangle())
                     .onTapGesture { onActivate?() }
-            case .loading, .idle:
-                Text("Updating…")
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(Theme.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .onTapGesture { onActivate?() }
+            case .loading:
+                updatingBody
+            case .idle:
+                if treatIdleAsUpdating {
+                    updatingBody
+                } else {
+                    Text("Waiting…")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Theme.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .onTapGesture { onActivate?() }
+                }
             case .signedOut(let message):
                 signedOutBody(message)
             case .failure(let message):
@@ -288,6 +298,15 @@ struct AccountCard: View {
                     .accessibilityHidden(true)
             }
         }
+    }
+
+    private var updatingBody: some View {
+        Text("Updating…")
+            .font(.system(size: 10.5))
+            .foregroundStyle(Theme.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture { onActivate?() }
     }
 
     private func readyBody(_ snapshot: UsageSnapshot) -> some View {

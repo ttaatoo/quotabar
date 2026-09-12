@@ -594,8 +594,50 @@ final class AppStore: ObservableObject {
     func refreshAll() async {
         isRefreshing = true
         defer { isRefreshing = false }
-        for provider in visibleProviders {
-            await refresh(provider)
+        let providers = visibleProviders
+        // Paint every card as in-flight before any provider hops off MainActor.
+        // Otherwise ChatGPT `.loading` + later `.idle` both read as "Updating…".
+        for provider in providers {
+            markRefreshStarted(provider, userInitiated: false)
+        }
+        // Fan-out off MainActor so ChatGPT / Go cannot stall Cursor / GLM / Grok.
+        await RefreshWork.mapConcurrent(providers) { provider in
+            await AppStore.shared.refresh(provider)
+        }
+    }
+
+    private func markRefreshStarted(_ provider: ProviderKind, userInitiated: Bool) {
+        switch provider {
+        case .chatgpt:
+            if settings.chatgptAccounts.isEmpty {
+                let current = states[.chatgpt] ?? .idle
+                if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+                    states[.chatgpt] = .loading
+                }
+            } else {
+                for account in settings.chatgptAccounts {
+                    let current = chatgptStates[account.id] ?? .idle
+                    if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+                        chatgptStates[account.id] = .loading
+                    }
+                }
+            }
+        case .opencodeGo:
+            if settings.opencodeGoAccounts.isEmpty {
+                let current = states[.opencodeGo] ?? .idle
+                if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+                    states[.opencodeGo] = .loading
+                }
+            } else {
+                for account in settings.opencodeGoAccounts {
+                    let current = opencodeGoStates[account.id] ?? .idle
+                    if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+                        opencodeGoStates[account.id] = .loading
+                    }
+                }
+            }
+        default:
+            states[provider] = .loading
         }
     }
 
@@ -609,22 +651,23 @@ final class AppStore: ObservableObject {
             return
         }
         states[provider] = .loading
-        do {
-            let snapshot: UsageSnapshot
-            if settings.previewFixtures {
-                snapshot = try FixtureLoader.load(provider, now: Date())
-            } else {
-                snapshot = try await fetchLive(provider)
-            }
+        let job = SingleProviderFetchJob(
+            provider: provider,
+            preview: settings.previewFixtures,
+            cursorCookie: emptyToNil(cursorCookie),
+            glmAPIKey: emptyToNil(glmAPIKey),
+            glmRegion: settings.glmRegion,
+            grokToken: emptyToNil(grokOAuthToken)
+        )
+        switch await RefreshWork.performSingle(job) {
+        case .success(let snapshot):
             states[provider] = .ready(snapshot)
-        } catch let error as QuotaError {
+        case .failure(let error):
             if error.isAuthFailure {
                 states[provider] = .signedOut(error.errorDescription ?? provider.signInHint)
             } else {
                 states[provider] = .failure(error.errorDescription ?? "Something went wrong.")
             }
-        } catch {
-            states[provider] = .failure(error.localizedDescription)
         }
     }
 
@@ -660,30 +703,11 @@ final class AppStore: ObservableObject {
             )
         }
 
-        var results: [(UUID, ProviderLoadState, Result<UsageSnapshot, Error>)] = []
-        await withTaskGroup(of: (UUID, ProviderLoadState, Result<UsageSnapshot, Error>).self) { group in
-            for job in jobs {
-                group.addTask {
-                    await Self.performChatGPTFetch(job)
-                }
-            }
-            for await item in group {
-                results.append(item)
-            }
+        let results = await RefreshWork.mapConcurrent(jobs) { job in
+            await RefreshWork.performChatGPT(job)
         }
-
-        for (id, previous, result) in results {
-            switch result {
-            case .success(let snapshot):
-                chatgptStates[id] = .ready(snapshot)
-                recordChatGPTEmail(snapshot.accountEmail, for: id)
-            case .failure(let error):
-                chatgptStates[id] = chatGPTFailureState(
-                    previous: previous,
-                    id: id,
-                    error: error
-                )
-            }
+        for item in results {
+            applyChatGPTResult(item)
         }
         ensureActiveChatGPTAccount()
     }
@@ -711,44 +735,20 @@ final class AppStore: ObservableObject {
             preview: settings.previewFixtures,
             variant: index
         )
-        let (_, previous, result) = await Self.performChatGPTFetch(job)
-        switch result {
-        case .success(let snapshot):
-            chatgptStates[id] = .ready(snapshot)
-            recordChatGPTEmail(snapshot.accountEmail, for: id)
-        case .failure(let error):
-            chatgptStates[id] = chatGPTFailureState(
-                previous: previous,
-                id: id,
-                error: error
-            )
-        }
+        applyChatGPTResult(await RefreshWork.performChatGPT(job))
     }
 
-    private static func performChatGPTFetch(
-        _ job: ChatGPTFetchJob
-    ) async -> (UUID, ProviderLoadState, Result<UsageSnapshot, Error>) {
-        do {
-            let snapshot: UsageSnapshot
-            if job.preview {
-                snapshot = try FixtureLoader.load(
-                    .chatgpt,
-                    now: Date(),
-                    variant: job.variant,
-                    emailOverride: job.email
-                )
-            } else {
-                snapshot = try await ChatGPTClient.fetch(
-                    cookie: job.cookie,
-                    pastedJSON: job.json,
-                    codexHomePath: job.home,
-                    allowAmbientCodex: job.allowAmbient,
-                    expectedEmail: job.email
-                )
-            }
-            return (job.id, job.previous, .success(snapshot))
-        } catch {
-            return (job.id, job.previous, .failure(error))
+    private func applyChatGPTResult(_ item: AccountFetchResult) {
+        switch item.result {
+        case .success(let snapshot):
+            chatgptStates[item.id] = .ready(snapshot)
+            recordChatGPTEmail(snapshot.accountEmail, for: item.id)
+        case .failure(let error):
+            chatgptStates[item.id] = chatGPTFailureState(
+                previous: item.previous,
+                id: item.id,
+                error: error
+            )
         }
     }
 
@@ -785,22 +785,22 @@ final class AppStore: ObservableObject {
         if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
             states[.chatgpt] = .loading
         }
-        do {
-            let snapshot = try await ChatGPTClient.fetch(
-                cookie: nil,
-                pastedJSON: nil,
-                allowAmbientCodex: true
+        applyImplicitChatGPT(
+            current,
+            await RefreshWork.performChatGPT(
+                ChatGPTFetchJob(
+                    id: Self.implicitChatGPTID,
+                    previous: current,
+                    cookie: nil,
+                    json: nil,
+                    home: nil,
+                    allowAmbient: true,
+                    email: nil,
+                    preview: false,
+                    variant: 0
+                )
             )
-            states[.chatgpt] = .ready(snapshot)
-        } catch {
-            if case .ready(let snapshot) = current {
-                states[.chatgpt] = .ready(snapshot)
-            } else if let quota = error as? QuotaError, quota.isAuthFailure {
-                states[.chatgpt] = .signedOut(quota.errorDescription ?? ProviderKind.chatgpt.signInHint)
-            } else {
-                states[.chatgpt] = .failure(error.localizedDescription)
-            }
-        }
+        )
     }
 
     private func refreshChatGPTPreviewFallback(userInitiated _: Bool) async {
@@ -808,10 +808,36 @@ final class AppStore: ObservableObject {
         if shouldShowLoading(current) {
             states[.chatgpt] = .loading
         }
-        do {
-            states[.chatgpt] = .ready(try FixtureLoader.load(.chatgpt, now: Date()))
-        } catch {
-            states[.chatgpt] = .failure(error.localizedDescription)
+        applyImplicitChatGPT(
+            current,
+            await RefreshWork.performChatGPT(
+                ChatGPTFetchJob(
+                    id: Self.implicitChatGPTID,
+                    previous: current,
+                    cookie: nil,
+                    json: nil,
+                    home: nil,
+                    allowAmbient: false,
+                    email: nil,
+                    preview: true,
+                    variant: 0
+                )
+            )
+        )
+    }
+
+    private func applyImplicitChatGPT(_ current: ProviderLoadState, _ item: AccountFetchResult) {
+        switch item.result {
+        case .success(let snapshot):
+            states[.chatgpt] = .ready(snapshot)
+        case .failure(let error):
+            if case .ready(let snapshot) = current {
+                states[.chatgpt] = .ready(snapshot)
+            } else if error.isAuthFailure {
+                states[.chatgpt] = .signedOut(error.errorDescription ?? ProviderKind.chatgpt.signInHint)
+            } else {
+                states[.chatgpt] = .failure(error.errorDescription ?? error.localizedDescription)
+            }
         }
     }
 
@@ -860,52 +886,12 @@ final class AppStore: ObservableObject {
         }
     }
 
-    private func fetchLive(_ provider: ProviderKind) async throws -> UsageSnapshot {
-        switch provider {
-        case .cursor:
-            return try await CursorClient.fetch(cookie: emptyToNil(cursorCookie))
-        case .chatgpt:
-            guard let id = settings.selectedChatGPTAccountId else {
-                return try await ChatGPTClient.fetch(cookie: nil, pastedJSON: nil, allowAmbientCodex: true)
-            }
-            let auth = chatGPTAuthInputs(for: id)
-            return try await ChatGPTClient.fetch(
-                cookie: auth.cookie,
-                pastedJSON: auth.json,
-                codexHomePath: auth.home,
-                allowAmbientCodex: auth.allowAmbient,
-                expectedEmail: auth.email
-            )
-        case .glm:
-            return try await GLMClient.fetch(apiKey: emptyToNil(glmAPIKey), region: settings.glmRegion)
-        case .grok:
-            return try await GrokClient.fetch(pastedToken: emptyToNil(grokOAuthToken))
-        case .opencodeGo:
-            if let id = settings.selectedOpenCodeGoAccountId {
-                return try await OpenCodeGoClient.fetch(apiKey: emptyToNil(opencodeGoAPIKeys[id, default: ""]))
-            }
-            return try await OpenCodeGoClient.fetch(apiKey: nil)
-        }
-    }
-
     private func emptyToNil(_ value: String) -> String? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
 
     static let implicitChatGPTID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
-}
-
-private struct ChatGPTFetchJob {
-    var id: UUID
-    var previous: ProviderLoadState
-    var cookie: String?
-    var json: String?
-    var home: String?
-    var allowAmbient: Bool
-    var email: String?
-    var preview: Bool
-    var variant: Int
 }
 
 struct ChatGPTDisplayRow: Identifiable, Equatable {
@@ -1091,30 +1077,11 @@ extension AppStore {
             )
         }
 
-        var results: [(UUID, ProviderLoadState, Result<UsageSnapshot, Error>)] = []
-        await withTaskGroup(of: (UUID, ProviderLoadState, Result<UsageSnapshot, Error>).self) { group in
-            for job in jobs {
-                group.addTask {
-                    await Self.performOpenCodeGoFetch(job)
-                }
-            }
-            for await item in group {
-                results.append(item)
-            }
+        let results = await RefreshWork.mapConcurrent(jobs) { job in
+            await RefreshWork.performOpenCodeGo(job)
         }
-
-        for (id, previous, result) in results {
-            switch result {
-            case .success(let snapshot):
-                opencodeGoStates[id] = .ready(snapshot)
-                recordOpenCodeGoEmail(snapshot.accountEmail, for: id)
-            case .failure(let error):
-                opencodeGoStates[id] = openCodeGoFailureState(
-                    previous: previous,
-                    id: id,
-                    error: error
-                )
-            }
+        for item in results {
+            applyOpenCodeGoResult(item)
         }
         ensureActiveOpenCodeGoAccount()
     }
@@ -1135,38 +1102,20 @@ extension AppStore {
             preview: settings.previewFixtures,
             variant: index
         )
-        let (_, previous, result) = await Self.performOpenCodeGoFetch(job)
-        switch result {
-        case .success(let snapshot):
-            opencodeGoStates[id] = .ready(snapshot)
-            recordOpenCodeGoEmail(snapshot.accountEmail, for: id)
-        case .failure(let error):
-            opencodeGoStates[id] = openCodeGoFailureState(
-                previous: previous,
-                id: id,
-                error: error
-            )
-        }
+        applyOpenCodeGoResult(await RefreshWork.performOpenCodeGo(job))
     }
 
-    private static func performOpenCodeGoFetch(
-        _ job: OpenCodeGoFetchJob
-    ) async -> (UUID, ProviderLoadState, Result<UsageSnapshot, Error>) {
-        do {
-            let snapshot: UsageSnapshot
-            if job.preview {
-                snapshot = try FixtureLoader.load(
-                    .opencodeGo,
-                    now: Date(),
-                    variant: job.variant,
-                    emailOverride: job.email
-                )
-            } else {
-                snapshot = try await OpenCodeGoClient.fetch(apiKey: job.apiKey)
-            }
-            return (job.id, job.previous, .success(snapshot))
-        } catch {
-            return (job.id, job.previous, .failure(error))
+    private func applyOpenCodeGoResult(_ item: AccountFetchResult) {
+        switch item.result {
+        case .success(let snapshot):
+            opencodeGoStates[item.id] = .ready(snapshot)
+            recordOpenCodeGoEmail(snapshot.accountEmail, for: item.id)
+        case .failure(let error):
+            opencodeGoStates[item.id] = openCodeGoFailureState(
+                previous: item.previous,
+                id: item.id,
+                error: error
+            )
         }
     }
 
@@ -1198,22 +1147,26 @@ extension AppStore {
         if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
             states[.opencodeGo] = .loading
         }
-        do {
-            if settings.previewFixtures {
-                states[.opencodeGo] = .ready(try FixtureLoader.load(.opencodeGo, now: Date()))
-                return
-            }
-            let snapshot = try await OpenCodeGoClient.fetch(apiKey: nil)
+        let item = await RefreshWork.performOpenCodeGo(
+            OpenCodeGoFetchJob(
+                id: Self.implicitOpenCodeGoID,
+                previous: current,
+                apiKey: nil,
+                email: nil,
+                preview: settings.previewFixtures,
+                variant: 0
+            )
+        )
+        switch item.result {
+        case .success(let snapshot):
             states[.opencodeGo] = .ready(snapshot)
-        } catch {
+        case .failure(let error):
             if case .ready(let snapshot) = current {
                 states[.opencodeGo] = .ready(snapshot)
-            } else if let quota = error as? QuotaError, quota.isAuthFailure {
-                states[.opencodeGo] = .signedOut(quota.errorDescription ?? ProviderKind.opencodeGo.signInHint)
-            } else if let quota = error as? QuotaError {
-                states[.opencodeGo] = .failure(quota.errorDescription ?? "Something went wrong.")
+            } else if error.isAuthFailure {
+                states[.opencodeGo] = .signedOut(error.errorDescription ?? ProviderKind.opencodeGo.signInHint)
             } else {
-                states[.opencodeGo] = .failure(error.localizedDescription)
+                states[.opencodeGo] = .failure(error.errorDescription ?? "Something went wrong.")
             }
         }
     }
@@ -1259,15 +1212,6 @@ extension AppStore {
         settings.opencodeGoAccounts[index].email = trimmed
         persistSettings()
     }
-}
-
-private struct OpenCodeGoFetchJob {
-    var id: UUID
-    var previous: ProviderLoadState
-    var apiKey: String?
-    var email: String?
-    var preview: Bool
-    var variant: Int
 }
 
 struct AccountCardRow: Identifiable, Equatable {
