@@ -25,12 +25,12 @@ final class SettingsWindowController: NSWindowController {
         let window = NSWindow(contentViewController: hosting)
         window.title = "Settings"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.setContentSize(NSSize(width: Theme.settingsColumnWidth, height: 720))
+        window.setContentSize(NSSize(width: Theme.settingsWindowWidth, height: Theme.settingsWindowHeight))
         window.contentMinSize = NSSize(width: Theme.settingsMinWidth, height: Theme.settingsMinHeight)
         window.isReleasedWhenClosed = false
         window.level = .floating
         window.appearance = NSAppearance(named: .darkAqua)
-        window.backgroundColor = Theme.backgroundNSColor
+        window.backgroundColor = Theme.settingsPageFillNSColor
         window.titlebarAppearsTransparent = false
         super.init(window: window)
     }
@@ -41,7 +41,7 @@ final class SettingsWindowController: NSWindowController {
     func show() {
         guard let window = window else { return }
         window.appearance = NSAppearance(named: .darkAqua)
-        window.backgroundColor = Theme.backgroundNSColor
+        window.backgroundColor = Theme.settingsPageFillNSColor
         window.contentView?.appearance = NSAppearance(named: .darkAqua)
         NSApp.activate(ignoringOtherApps: true)
         if window.isMiniaturized {
