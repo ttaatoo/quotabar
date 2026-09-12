@@ -54,6 +54,8 @@ struct UsageSnapshot: Equatable, Sendable {
     var source: SnapshotSource
     var extraFooter: String?
     var accountEmail: String? = nil
+    /// Subscription / plan end when the provider publishes one. Never a window reset.
+    var planExpiresAt: Date? = nil
 
     var windows: [UsageWindow] {
         [session, weekly, monthly].compactMap { $0 }

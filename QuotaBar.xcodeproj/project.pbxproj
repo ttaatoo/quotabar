@@ -27,6 +27,8 @@
 		000000000000000000000022 /* GLMClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000021 /* GLMClient.swift */; };
 		000000000000000000000091 /* GrokAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000090 /* GrokAuth.swift */; };
 		000000000000000000000093 /* GrokClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000092 /* GrokClient.swift */; };
+		0000000000000000000000F1 /* GrokCLILocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000F0 /* GrokCLILocator.swift */; };
+		0000000000000000000000F3 /* GrokLoginWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000F2 /* GrokLoginWindowController.swift */; };
 		0000000000000000000000B1 /* OpenCodeGoClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000B0 /* OpenCodeGoClient.swift */; };
 		000000000000000000000024 /* FixtureLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000023 /* FixtureLoader.swift */; };
 		000000000000000000000026 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000025 /* Theme.swift */; };
@@ -36,6 +38,8 @@
 		00000000000000000000002E /* PopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000002D /* PopoverView.swift */; };
 		0000000000000000000000A1 /* FrozenPopoverHosting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000A0 /* FrozenPopoverHosting.swift */; };
 		000000000000000000000030 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000002F /* SettingsView.swift */; };
+		0000000000000000000000D1 /* SettingsChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000D0 /* SettingsChrome.swift */; };
+		0000000000000000000000E0 /* ProviderMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000E1 /* ProviderMark.swift */; };
 		000000000000000000000032 /* SettingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000031 /* SettingsWindowController.swift */; };
 		000000000000000000000034 /* StatusItemRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000033 /* StatusItemRenderer.swift */; };
 		000000000000000000000071 /* CodexLoginWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000070 /* CodexLoginWindowController.swift */; };
@@ -71,6 +75,8 @@
 		000000000000000000000021 /* GLMClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GLMClient.swift; sourceTree = "<group>"; };
 		000000000000000000000090 /* GrokAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokAuth.swift; sourceTree = "<group>"; };
 		000000000000000000000092 /* GrokClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokClient.swift; sourceTree = "<group>"; };
+		0000000000000000000000F0 /* GrokCLILocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokCLILocator.swift; sourceTree = "<group>"; };
+		0000000000000000000000F2 /* GrokLoginWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokLoginWindowController.swift; sourceTree = "<group>"; };
 		0000000000000000000000B0 /* OpenCodeGoClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGoClient.swift; sourceTree = "<group>"; };
 		000000000000000000000023 /* FixtureLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureLoader.swift; sourceTree = "<group>"; };
 		000000000000000000000025 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
@@ -80,6 +86,8 @@
 		00000000000000000000002D /* PopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverView.swift; sourceTree = "<group>"; };
 		0000000000000000000000A0 /* FrozenPopoverHosting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrozenPopoverHosting.swift; sourceTree = "<group>"; };
 		00000000000000000000002F /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		0000000000000000000000D0 /* SettingsChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsChrome.swift; sourceTree = "<group>"; };
+		0000000000000000000000E1 /* ProviderMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderMark.swift; sourceTree = "<group>"; };
 		000000000000000000000031 /* SettingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowController.swift; sourceTree = "<group>"; };
 		000000000000000000000033 /* StatusItemRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusItemRenderer.swift; sourceTree = "<group>"; };
 		000000000000000000000070 /* CodexLoginWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexLoginWindowController.swift; sourceTree = "<group>"; };
@@ -171,6 +179,7 @@
 				00000000000000000000001F /* ChatGPTClient.swift */,
 				000000000000000000000021 /* GLMClient.swift */,
 				000000000000000000000090 /* GrokAuth.swift */,
+				0000000000000000000000F0 /* GrokCLILocator.swift */,
 				000000000000000000000092 /* GrokClient.swift */,
 				0000000000000000000000B0 /* OpenCodeGoClient.swift */,
 				000000000000000000000023 /* FixtureLoader.swift */,
@@ -188,8 +197,11 @@
 				00000000000000000000002D /* PopoverView.swift */,
 				0000000000000000000000A0 /* FrozenPopoverHosting.swift */,
 				00000000000000000000002F /* SettingsView.swift */,
+				0000000000000000000000D0 /* SettingsChrome.swift */,
+				0000000000000000000000E1 /* ProviderMark.swift */,
 				000000000000000000000031 /* SettingsWindowController.swift */,
 				000000000000000000000070 /* CodexLoginWindowController.swift */,
+				0000000000000000000000F2 /* GrokLoginWindowController.swift */,
 				000000000000000000000033 /* StatusItemRenderer.swift */,
 			);
 			path = UI;
@@ -319,7 +331,9 @@
 				000000000000000000000020 /* ChatGPTClient.swift in Sources */,
 				000000000000000000000022 /* GLMClient.swift in Sources */,
 				000000000000000000000091 /* GrokAuth.swift in Sources */,
+				0000000000000000000000F1 /* GrokCLILocator.swift in Sources */,
 				000000000000000000000093 /* GrokClient.swift in Sources */,
+				0000000000000000000000F3 /* GrokLoginWindowController.swift in Sources */,
 				0000000000000000000000B1 /* OpenCodeGoClient.swift in Sources */,
 				000000000000000000000024 /* FixtureLoader.swift in Sources */,
 				000000000000000000000026 /* Theme.swift in Sources */,
@@ -329,6 +343,8 @@
 				00000000000000000000002E /* PopoverView.swift in Sources */,
 				0000000000000000000000A1 /* FrozenPopoverHosting.swift in Sources */,
 				000000000000000000000030 /* SettingsView.swift in Sources */,
+				0000000000000000000000D1 /* SettingsChrome.swift in Sources */,
+				0000000000000000000000E0 /* ProviderMark.swift in Sources */,
 				000000000000000000000032 /* SettingsWindowController.swift in Sources */,
 				000000000000000000000071 /* CodexLoginWindowController.swift in Sources */,
 				000000000000000000000034 /* StatusItemRenderer.swift in Sources */,

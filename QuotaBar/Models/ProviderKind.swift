@@ -59,13 +59,13 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable, Hashable, Sendab
         case .cursor:
             return "Sign in to Cursor.app, or paste a WorkosCursorSessionToken cookie in Settings."
         case .chatgpt:
-            return "Add a ChatGPT account in Settings to run `codex login` in your default browser, or paste a session cookie / usage JSON under Advanced."
+            return "Add a ChatGPT account in Settings to sign in with Codex in your browser."
         case .glm:
             return "Paste a z.ai / BigModel API key in Settings, or set Z_AI_API_KEY."
         case .grok:
-            return GrokAuth.signInHint
+            return "Add a Grok account in Settings to sign in with the Grok CLI in your browser."
         case .opencodeGo:
-            return "Add an OpenCode Go API key in Settings."
+            return "Add an OpenCode Go API key in Settings, or set OPENCODE_GO_API_KEY / OPENCODE_API_KEY."
         }
     }
 }

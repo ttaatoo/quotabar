@@ -57,7 +57,11 @@ enum ChatGPTClient {
                             planName: identity.planName,
                             now: now
                         ) {
-                            return try validatedSnapshot(snapshot, expectedEmail: expectedEmail)
+                            return try validatedSnapshot(
+                                snapshot,
+                                expectedEmail: expectedEmail,
+                                planExpiresAt: identity.planExpiresAt
+                            )
                         }
                         gotJSONWithoutWindows = true
                     } catch let error as QuotaError where error.isAuthFailure {
@@ -114,10 +118,14 @@ enum ChatGPTClient {
         let fallbackAccountId = cookieIdentity?.accountId ?? codexTokens?.accountId
         let fallbackEmail = cookieIdentity?.email ?? codexTokens?.email
         var fallbackPlan = cookieIdentity?.planName ?? codexTokens?.planName
+        var fallbackExpires = cookieIdentity?.planExpiresAt
 
         if let fallbackToken {
             if fallbackPlan == nil {
-                fallbackPlan = try? await fetchPlanName(accessToken: fallbackToken, accountId: fallbackAccountId)
+                if let info = try? await fetchPlanInfo(accessToken: fallbackToken, accountId: fallbackAccountId) {
+                    fallbackPlan = info.name
+                    fallbackExpires = fallbackExpires ?? info.expiresAt
+                }
             }
             do {
                 if let snapshot = try await fetchConversationLimit(
@@ -128,7 +136,11 @@ enum ChatGPTClient {
                     planName: fallbackPlan,
                     now: now
                 ) {
-                    return try validatedSnapshot(snapshot, expectedEmail: expectedEmail)
+                    return try validatedSnapshot(
+                        snapshot,
+                        expectedEmail: expectedEmail,
+                        planExpiresAt: fallbackExpires
+                    )
                 }
                 gotJSONWithoutWindows = true
             } catch {
@@ -152,7 +164,7 @@ enum ChatGPTClient {
                 )
             }
             throw QuotaError.notSignedIn(
-                "Add a ChatGPT account in Settings (`codex login` in your default browser), or paste a session cookie / usage JSON under Advanced."
+                "Add a ChatGPT account in Settings to sign in with Codex in your browser."
             )
         }
 
@@ -268,6 +280,7 @@ enum ChatGPTClient {
         var email: String?
         var planName: String?
         var accountId: String?
+        var planExpiresAt: Date?
     }
 
     private static func fetchSession(cookie: String) async throws -> Identity {
@@ -302,11 +315,21 @@ enum ChatGPTClient {
             accessToken: accessToken,
             email: email,
             planName: plan.map(CodexCLIAuth.humanPlanName),
-            accountId: accountId(fromSession: object, accessToken: accessToken)
+            accountId: accountId(fromSession: object, accessToken: accessToken),
+            planExpiresAt: subscriptionExpires(from: object)
         )
     }
 
+    private struct PlanInfo {
+        var name: String
+        var expiresAt: Date?
+    }
+
     private static func fetchPlanName(accessToken: String, accountId: String?) async throws -> String {
+        try await fetchPlanInfo(accessToken: accessToken, accountId: accountId).name
+    }
+
+    private static func fetchPlanInfo(accessToken: String, accountId: String?) async throws -> PlanInfo {
         let url = URL(string: "https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27")!
         let (data, response) = try await HTTPClient.get(
             url: url,
@@ -318,7 +341,10 @@ enum ChatGPTClient {
             .compactMap { $0.object["entitlement"] as? [String: Any] ?? ($0.key == "entitlement" ? $0.object : nil) }
         if let entitlement = entitlements.first {
             if let plan = entitlement["subscription_plan"] as? String {
-                return humanPlanName(plan)
+                return PlanInfo(
+                    name: humanPlanName(plan),
+                    expiresAt: subscriptionExpires(from: entitlement) ?? subscriptionExpires(from: object)
+                )
             }
         }
         throw QuotaError.schema("No plan on accounts/check.")
@@ -545,7 +571,7 @@ enum ChatGPTClient {
             ?? JSONWalk.string(raw, keys: ["plan", "planName", "plan_type", "planType"])
             .map(humanPlanName)
 
-        return UsageSnapshot(
+        var snapshot = UsageSnapshot(
             provider: .chatgpt,
             planName: plan,
             fetchedAt: fetchedAt,
@@ -554,6 +580,11 @@ enum ChatGPTClient {
             source: source,
             extraFooter: nil
         )
+        snapshot.planExpiresAt = subscriptionExpires(
+            from: raw,
+            windowResets: [slots.session?.resetAt, slots.longer?.resetAt].compactMap { $0 }
+        )
+        return snapshot
     }
 
     /// CodexBar-shaped `wham/usage`. Classify each window by duration
@@ -606,6 +637,10 @@ enum ChatGPTClient {
             extraFooter: creditsFooter(from: raw)
         )
         snapshot.accountEmail = resolvedEmail
+        snapshot.planExpiresAt = subscriptionExpires(
+            from: raw,
+            windowResets: [slots.session?.resetAt, slots.longer?.resetAt].compactMap { $0 }
+        )
         return snapshot
     }
 
@@ -718,6 +753,10 @@ enum ChatGPTClient {
         )
         snapshot.accountEmail = JSONWalk.string(raw, keys: ["email", "accountEmail"])
             ?? CodexCLIAuth.email(from: raw)
+        snapshot.planExpiresAt = subscriptionExpires(
+            from: raw,
+            windowResets: [session?.resetAt, weekly?.resetAt].compactMap { $0 }
+        )
         return snapshot
     }
 
@@ -836,7 +875,11 @@ enum ChatGPTClient {
                 planName: current.planName ?? cookieIdentity?.planName,
                 now: now
             ) {
-                return .snapshot(try validatedSnapshot(snapshot, expectedEmail: expectedEmail))
+                return .snapshot(try validatedSnapshot(
+                    snapshot,
+                    expectedEmail: expectedEmail,
+                    planExpiresAt: cookieIdentity?.planExpiresAt
+                ))
             }
             return .emptyJSON
         } catch let error as QuotaError where error.isAuthFailure {
@@ -862,7 +905,11 @@ enum ChatGPTClient {
                     planName: current.planName ?? cookieIdentity?.planName,
                     now: now
                 ) {
-                    return .snapshot(try validatedSnapshot(snapshot, expectedEmail: expectedEmail))
+                    return .snapshot(try validatedSnapshot(
+                        snapshot,
+                        expectedEmail: expectedEmail,
+                        planExpiresAt: cookieIdentity?.planExpiresAt
+                    ))
                 }
                 return .emptyJSON
             } catch {
@@ -952,14 +999,19 @@ enum ChatGPTClient {
 
     private static func validatedSnapshot(
         _ snapshot: UsageSnapshot,
-        expectedEmail: String?
+        expectedEmail: String?,
+        planExpiresAt: Date? = nil
     ) throws -> UsageSnapshot {
         guard identitiesMatch(snapshot.accountEmail, expectedEmail) else {
             throw QuotaError.schema(
                 "Usage response was for \(snapshot.accountEmail ?? "another account"), not \(expectedEmail ?? "this account")."
             )
         }
-        return snapshot
+        var snap = snapshot
+        if snap.planExpiresAt == nil {
+            snap.planExpiresAt = planExpiresAt
+        }
+        return snap
     }
 
     private static func accountId(fromSession object: [String: Any], accessToken: String) -> String? {
@@ -995,5 +1047,59 @@ enum ChatGPTClient {
             return nil
         }
         return value
+    }
+
+    /// Subscription / plan end only. Ignores quota-window `reset_at` and JWT `exp`.
+    static func subscriptionExpires(from value: Any, windowResets: [Date] = []) -> Date? {
+        let skipKeys: Set<String> = [
+            "primary_window", "primaryWindow", "secondary_window", "secondaryWindow",
+            "session", "weekly", "monthly", "rate_limit", "rateLimit",
+            "credits", "windows", "limits"
+        ]
+        let expiryKeys = [
+            "subscription_expires_at", "subscriptionExpiresAt",
+            "subscription_end", "subscriptionEnd",
+            "plan_expires_at", "planExpiresAt",
+            "access_until", "accessUntil",
+            "valid_until", "validUntil",
+            "expires_at", "expiresAt", "expire_at", "expireAt"
+        ]
+        let periodKeys = ["current_period_end", "currentPeriodEnd", "period_end", "periodEnd"]
+
+        for (key, object) in JSONWalk.dictionaries(in: value) {
+            if let key, skipKeys.contains(key) { continue }
+            for name in expiryKeys {
+                if let date = TimeFormatting.parseDate(object[name]),
+                   isPlausiblePlanExpiry(date, windowResets: windowResets) {
+                    return date
+                }
+            }
+            let parent = key?.lowercased() ?? ""
+            let subscriptionContext = parent.contains("subscription")
+                || parent.contains("entitlement")
+                || parent == "account"
+                || parent.contains("billing")
+            if subscriptionContext {
+                for name in periodKeys {
+                    if let date = TimeFormatting.parseDate(object[name]),
+                       isPlausiblePlanExpiry(date, windowResets: windowResets) {
+                        return date
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func isPlausiblePlanExpiry(_ date: Date, windowResets: [Date]) -> Bool {
+        for reset in windowResets {
+            if abs(date.timeIntervalSince(reset)) < 3600 {
+                return false
+            }
+        }
+        let delta = date.timeIntervalSince(Date())
+        if delta > 5 * 365 * 86_400 { return false }
+        if delta < -2 * 365 * 86_400 { return false }
+        return true
     }
 }

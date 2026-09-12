@@ -9,14 +9,20 @@ enum ConfigStore {
     static func load() -> AppSettings {
         var settings = AppSettings.default
         var shouldRewrite = false
+        var hadGrokAccountsKey = false
         if let data = try? Data(contentsOf: configURL),
            let file = try? JSONDecoder().decode(ConfigFile.self, from: data) {
             settings = file.settings
             migrateSecrets(from: file)
             shouldRewrite = file.glmApiKey != nil || file.cursorCookie != nil || file.chatgptCookie != nil
+            hadGrokAccountsKey = file.grokAccounts != nil
         }
         let migratedLegacyChatGPT = migrateLegacyChatGPTAccounts(&settings)
         if migratedLegacyChatGPT {
+            shouldRewrite = true
+        }
+        let migratedLegacyGrok = migrateLegacyGrokAccounts(&settings, hadGrokAccountsKey: hadGrokAccountsKey)
+        if migratedLegacyGrok {
             shouldRewrite = true
         }
         let beforeSanitize = settings
@@ -33,6 +39,9 @@ enum ConfigStore {
                 KeychainStore.delete(.chatgptCookie)
                 KeychainStore.delete(.chatgptJSON)
             }
+        }
+        if grokAccountsSupersedeLegacyToken(settings) {
+            KeychainStore.delete(.grokOAuthToken)
         }
         return settings
     }
@@ -132,6 +141,54 @@ enum ConfigStore {
             KeychainStore.set(json, account: .chatgptAccountJSON(id))
         }
     }
+
+    /// Pre-multi-account Grok was one Keychain bearer plus optional `~/.grok/auth.json`.
+    /// Missing `grokAccounts` (nil) migrates that into one account. An explicit empty
+    /// array means the user deleted every Grok row and must not be recreated on launch.
+    @discardableResult
+    static func migrateLegacyGrokAccounts(_ settings: inout AppSettings, hadGrokAccountsKey: Bool) -> Bool {
+        let legacyToken = KeychainStore.get(.grokOAuthToken)
+        let ambient = GrokAuth.loadAuthFile()
+
+        if !hadGrokAccountsKey, settings.grokAccounts.isEmpty {
+            guard legacyToken != nil || ambient != nil else { return false }
+            let id = UUID()
+            let email = ambient?.email ?? AccountIdentity.fromToken(legacyToken ?? "")
+            settings.grokAccounts = [
+                GrokAccount(
+                    id: id,
+                    label: email ?? "Grok",
+                    enabled: true,
+                    email: email,
+                    usesAmbientAuthFile: ambient != nil
+                )
+            ]
+            settings.selectedGrokAccountId = id
+            if let legacyToken {
+                KeychainStore.set(legacyToken, account: .grokAccountOAuthToken(id))
+            }
+            return true
+        }
+
+        guard settings.grokAccounts.count == 1,
+              let id = settings.grokAccounts.first?.id,
+              let legacyToken
+        else { return false }
+
+        if KeychainStore.get(.grokAccountOAuthToken(id)) == nil {
+            KeychainStore.set(legacyToken, account: .grokAccountOAuthToken(id))
+            return true
+        }
+        return false
+    }
+
+    private static func grokAccountsSupersedeLegacyToken(_ settings: AppSettings) -> Bool {
+        settings.grokAccounts.contains { account in
+            KeychainStore.get(.grokAccountOAuthToken(account.id)) != nil
+                || account.usesAmbientAuthFile
+                || !(account.grokHomePath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        }
+    }
 }
 
 private struct ConfigFile: Codable {
@@ -148,6 +205,8 @@ private struct ConfigFile: Codable {
     var opencodeGoAccounts: [OpenCodeGoAccount]?
     var selectedOpenCodeGoAccountId: UUID?
     var didIntroduceOpenCodeGo: Bool?
+    var grokAccounts: [GrokAccount]?
+    var selectedGrokAccountId: UUID?
 
     /// Legacy / imported secrets. Written as null after migration.
     var glmApiKey: String?
@@ -168,6 +227,8 @@ private struct ConfigFile: Codable {
         opencodeGoAccounts = settings.opencodeGoAccounts
         selectedOpenCodeGoAccountId = settings.selectedOpenCodeGoAccountId
         didIntroduceOpenCodeGo = settings.didIntroduceOpenCodeGo
+        grokAccounts = settings.grokAccounts
+        selectedGrokAccountId = settings.selectedGrokAccountId
         glmApiKey = nil
         cursorCookie = nil
         chatgptCookie = nil
@@ -190,6 +251,8 @@ private struct ConfigFile: Codable {
         if let selectedOpenCodeGoAccountId { value.selectedOpenCodeGoAccountId = selectedOpenCodeGoAccountId }
         // Missing key = pre-OpenCode config. sanitize() appends OpenCode Go once.
         value.didIntroduceOpenCodeGo = didIntroduceOpenCodeGo ?? false
+        if let grokAccounts { value.grokAccounts = grokAccounts }
+        if let selectedGrokAccountId { value.selectedGrokAccountId = selectedGrokAccountId }
         return value
     }
 }

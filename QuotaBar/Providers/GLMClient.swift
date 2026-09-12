@@ -18,7 +18,11 @@ enum GLMClient {
         )
         try HTTPClient.requireOK(response, data: data, host: url.host ?? "z.ai")
         let object = try JSONWalk.object(from: data)
-        return try parse(object, fetchedAt: now)
+        var snapshot = try parse(object, token: token, fetchedAt: now)
+        if snapshot.accountEmail == nil {
+            snapshot.accountEmail = await fetchProfileIdentity(token: token, region: region)
+        }
+        return snapshot
     }
 
     static func resolveToken(explicit: String?) -> String? {
@@ -35,7 +39,7 @@ enum GLMClient {
         return nil
     }
 
-    static func parse(_ raw: [String: Any], fetchedAt: Date = Date()) throws -> UsageSnapshot {
+    static func parse(_ raw: [String: Any], token: String? = nil, fetchedAt: Date = Date()) throws -> UsageSnapshot {
         if let success = raw["success"] as? Bool, success == false {
             let message = (raw["msg"] as? String) ?? "GLM quota request failed."
             throw QuotaError.schema(message)
@@ -82,7 +86,7 @@ enum GLMClient {
 
         let extra = mcpExtra(from: limits)
 
-        return UsageSnapshot(
+        var snapshot = UsageSnapshot(
             provider: .glm,
             planName: plan,
             fetchedAt: fetchedAt,
@@ -91,6 +95,38 @@ enum GLMClient {
             source: .live,
             extraFooter: extra
         )
+        snapshot.accountEmail = AccountIdentity.resolve(json: raw, token: token)
+        return snapshot
+    }
+
+    /// Optional profile endpoints. A 2s miss must not block quota.
+    static func fetchProfileIdentity(token: String, region: GLMRegion) async -> String? {
+        let paths = [
+            "/api/paas/v4/user",
+            "/api/monitor/user",
+            "/api/paas/v4/user/credit_grants"
+        ]
+        for path in paths {
+            guard let url = URL(string: region.hostString + path) else { continue }
+            do {
+                let (data, response) = try await HTTPClient.get(
+                    url: url,
+                    headers: [
+                        "Authorization": "Bearer \(token)",
+                        "Accept": "application/json"
+                    ],
+                    timeout: 2
+                )
+                guard (200...299).contains(response.statusCode) else { continue }
+                let object = try JSONWalk.object(from: data)
+                if let identity = AccountIdentity.fromJSON(object) {
+                    return identity
+                }
+            } catch {
+                continue
+            }
+        }
+        return nil
     }
 
     private static func parseTokenLimit(_ limit: [String: Any]) -> (TimeInterval, UsageWindow)? {

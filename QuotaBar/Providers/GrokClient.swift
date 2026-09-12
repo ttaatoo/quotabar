@@ -6,39 +6,59 @@ enum GrokClient {
     static let billingURL = URL(string: "https://cli-chat-proxy.grok.com/v1/billing?format=credits")!
     static let settingsURL = URL(string: "https://cli-chat-proxy.grok.com/v1/settings")!
 
-    static func fetch(pastedToken: String?, now: Date = Date()) async throws -> UsageSnapshot {
-        let credentials = try GrokAuth.resolve(pasted: pastedToken)
+    static func fetch(
+        pastedToken: String?,
+        useAmbientFile: Bool = true,
+        allowEnvironment: Bool = true,
+        grokHomePath: String? = nil,
+        now: Date = Date()
+    ) async throws -> UsageSnapshot {
+        let credentials = try GrokAuth.resolve(
+            pasted: pastedToken,
+            useAmbientFile: useAmbientFile,
+            allowEnvironment: allowEnvironment,
+            grokHomePath: grokHomePath
+        )
         let headers = proxyHeaders(token: credentials.accessToken)
 
         let (data, response) = try await HTTPClient.get(url: billingURL, headers: headers)
         try HTTPClient.requireOK(response, data: data, host: billingURL.host ?? "cli-chat-proxy.grok.com")
 
         let object = try JSONWalk.object(from: data)
-        let plan = await fetchSubscriptionTier(token: credentials.accessToken)
-            ?? credentials.planFallback
-        return try parse(
+        let extras = await fetchSettingsExtras(token: credentials.accessToken)
+        let plan = extras.plan ?? credentials.planFallback
+        var snapshot = try parse(
             object,
-            email: credentials.email,
+            email: credentials.email ?? extras.email,
             planFallback: plan,
             fetchedAt: now
         )
+        if snapshot.accountEmail == nil {
+            snapshot.accountEmail = extras.email ?? AccountIdentity.fromToken(credentials.accessToken)
+        }
+        return snapshot
     }
 
     /// `GET /v1/settings` is optional enrichment. A 2s timeout or any failure must not block usage.
     static func fetchSubscriptionTier(token: String) async -> String? {
+        await fetchSettingsExtras(token: token).plan
+    }
+
+    static func fetchSettingsExtras(token: String) async -> (plan: String?, email: String?) {
         do {
             let (data, response) = try await HTTPClient.get(
                 url: settingsURL,
                 headers: proxyHeaders(token: token),
                 timeout: 2
             )
-            guard (200...299).contains(response.statusCode) else { return nil }
+            guard (200...299).contains(response.statusCode) else { return (nil, nil) }
             let object = try JSONWalk.object(from: data)
-            return GrokAuth.displayPlanName(
+            let plan = GrokAuth.displayPlanName(
                 JSONWalk.string(object, keys: ["subscription_tier_display", "subscriptionTierDisplay"])
             )
+            return (plan, AccountIdentity.fromJSON(object))
         } catch {
-            return nil
+            return (nil, nil)
         }
     }
 
@@ -97,6 +117,7 @@ enum GrokClient {
             extraFooter: nil
         )
         snapshot.accountEmail = email
+            ?? AccountIdentity.fromJSON(raw)
             ?? JSONWalk.string(raw, keys: ["email", "accountEmail"])
         return snapshot
     }

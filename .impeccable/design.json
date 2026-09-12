@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-12T00:00:00.000Z",
+  "title": "Design System: QuotaBar",
+  "extensions": {
+    "colorMeta": {
+      "settings-accent": {
+        "role": "primary",
+        "displayName": "Violet Signal",
+        "canonical": "#B56BFF",
+        "tonalRamp": ["#2A1638", "#4A2270", "#6E2FA6", "#8F4AD4", "#B56BFF", "#C992FF", "#D6B8FF", "#F3E9FF"]
+      },
+      "settings-page": {
+        "role": "neutral",
+        "displayName": "Night Page",
+        "canonical": "#1A191F",
+        "tonalRamp": ["#0C0B10", "#16151C", "#1A191F", "#24222C", "#3A3646", "#7A7488", "#A8A3B5", "#F4F1F8"]
+      },
+      "settings-sidebar": {
+        "role": "neutral",
+        "displayName": "Night Rail",
+        "canonical": "#16151C",
+        "tonalRamp": ["#0C0B10", "#12111A", "#16151C", "#1A191F", "#24222C", "#7A7488", "#A8A3B5", "#F4F1F8"]
+      }
+    },
+    "typographyMeta": {
+      "title": { "displayName": "Title", "purpose": "Settings pane name only." },
+      "sidebar": { "displayName": "Sidebar", "purpose": "Preference navigation labels." },
+      "row": { "displayName": "Row", "purpose": "Preference titles and account emails." },
+      "body": { "displayName": "Body", "purpose": "Pane subtitles." },
+      "caption": { "displayName": "Caption", "purpose": "Field hints and About disclaimer." }
+    },
+    "shadows": [],
+    "motion": [
+      {
+        "name": "settings-ease",
+        "value": "ease-out 160ms",
+        "purpose": "Sidebar selection and Advanced disclosure. Skipped when Reduce Motion is on."
+      }
+    ],
+    "breakpoints": [
+      { "name": "settings-window", "value": "680px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Violet Add account and empty-state action.",
+      "html": "<button class=\"ds-btn-primary\">Add account</button>",
+      "css": ".ds-btn-primary { background: #B56BFF; color: #F4F1F8; padding: 0 12px; height: 28px; border: none; border-radius: 7px; font: 500 12.5px/1 -apple-system, system-ui, sans-serif; } .ds-btn-primary:hover { filter: brightness(1.06); } .ds-btn-primary:focus-visible { outline: 1.5px solid #B56BFF; outline-offset: 2px; }"
+    },
+    {
+      "name": "Secret Field",
+      "kind": "input",
+      "refersTo": "secret-field",
+      "description": "Keychain secret with reveal and violet focus ring.",
+      "html": "<label class=\"ds-secret\"><span>API key</span><input type=\"password\" placeholder=\"API key\" /></label>",
+      "css": ".ds-secret { display: flex; flex-direction: column; gap: 6px; color: #A8A3B5; font: 500 11px/1.3 -apple-system, system-ui, sans-serif; } .ds-secret input { height: 30px; background: #12111A; color: #F4F1F8; border: 1px solid #B4AACC2E; border-radius: 7px; padding: 0 10px; } .ds-secret input:focus { outline: none; border-color: #B56BFF; border-width: 1.5px; }"
+    },
+    {
+      "name": "Sidebar Item",
+      "kind": "nav",
+      "refersTo": "nav-item-selected",
+      "description": "Selected Settings rail row with full-row violet wash.",
+      "html": "<button class=\"ds-nav-item is-selected\">ChatGPT</button>",
+      "css": ".ds-nav-item { height: 28px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: #A8A3B5; font: 500 12.5px/1 -apple-system, system-ui, sans-serif; width: 100%; text-align: left; } .ds-nav-item.is-selected { background: rgba(181,107,255,0.16); color: #F4F1F8; font-weight: 600; } .ds-nav-item:hover:not(.is-selected) { background: rgba(244,241,248,0.06); }"
+    },
+    {
+      "name": "Settings Group",
+      "kind": "card",
+      "refersTo": "settings-group",
+      "description": "Single grouped preference surface. Never nested.",
+      "html": "<div class=\"ds-group\">Poll interval</div>",
+      "css": ".ds-group { background: #24222C; color: #F4F1F8; border: 1px solid #B4AACC2E; border-radius: 10px; padding: 8px 12px; min-height: 36px; font: 500 13px/1.3 -apple-system, system-ui, sans-serif; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Night Menu Extra",
+    "overview": "QuotaBar is a menu-bar utility, not a settings product. Settings must feel like the dark popover opened one notch wider. Surfaces are purple-tinted dark neutrals. One violet accent does selection, focus, and primary actions.",
+    "keyCharacteristics": [
+      "Restrained: tinted dark neutrals + one purple accent",
+      "Sidebar + one pane (never an endless card wall)",
+      "SF Pro only; SF Mono for pasted JSON",
+      "Tonal elevation (lighter = higher), no drop shadows",
+      "Provider hues stay on 12pt icons, never on full-width fills"
+    ],
+    "rules": [
+      { "name": "The One Voice Rule", "body": "Purple accent occupies ≤10% of Settings: primary actions, current sidebar row, focus, and toggle-on.", "section": "colors" },
+      { "name": "The Tinted Night Rule", "body": "Settings neutrals lean violet. Do not use #000, #fff, or untinted gray. Do not restyle popover meters.", "section": "colors" },
+      { "name": "The One Family Rule", "body": "SF Pro for every Settings label. No display face. Group labels are 10.5 medium dusk, title case.", "section": "typography" },
+      { "name": "The Flat Night Rule", "body": "If you can see a drop shadow, remove it. If a group is nested inside a group, flatten it.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep Settings in the Night Menu Extra register: dark, dense, native.",
+      "Do put every Settings color through Theme tokens.",
+      "Do collapse Advanced cookie/JSON by default.",
+      "Do teach empty ChatGPT and OpenCode lists with a next action.",
+      "Do leave Keychain account names and config.json keys unchanged."
+    ],
+    "donts": [
+      "Don't clone bright macOS System Settings (large white grouped lists, toolbar icon grid).",
+      "Don't stack identical icon-title-hint cards down an endless window.",
+      "Don't use border-left / side-stripe accents on rows or groups.",
+      "Don't fill primary buttons with teal, green, amber, or blue; violet is the only action fill.",
+      "Don't nest cards, add glass blur, gradient text, or decorative motion.",
+      "Don't restyle popover meter geometry or rewrite NSPopover.contentSize."
+    ]
+  }
+}

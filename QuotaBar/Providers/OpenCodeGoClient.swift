@@ -26,15 +26,28 @@ enum OpenCodeGoClient {
         return try parse(object, fetchedAt: now)
     }
 
+    static let ambientEnvironmentVariableNames = ["OPENCODE_GO_API_KEY", "OPENCODE_API_KEY"]
+
     static func resolveToken(explicit: String?) -> String? {
         if let explicit {
             let trimmed = explicit.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty { return trimmed }
         }
-        for name in ["OPENCODE_GO_API_KEY", "OPENCODE_API_KEY"] {
+        for name in ambientEnvironmentVariableNames {
             if let value = ProcessInfo.processInfo.environment[name]?.trimmingCharacters(in: .whitespacesAndNewlines),
                !value.isEmpty {
                 return value
+            }
+        }
+        return nil
+    }
+
+    /// Env var name that `resolveToken(explicit: nil)` would read. Never the secret itself.
+    static func ambientEnvironmentVariableName() -> String? {
+        for name in ambientEnvironmentVariableNames {
+            if let value = ProcessInfo.processInfo.environment[name]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !value.isEmpty {
+                return name
             }
         }
         return nil

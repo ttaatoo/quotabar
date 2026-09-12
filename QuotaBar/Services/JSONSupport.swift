@@ -111,6 +111,75 @@ enum JWT {
     }
 }
 
+/// Display identity for a provider card. Prefers a real email, then a
+/// username / handle, then a short account id. Never invents an address.
+enum AccountIdentity {
+    static func fromJSON(_ value: Any) -> String? {
+        for (_, object) in JSONWalk.dictionaries(in: value) {
+            if let email = CodexCLIAuth.email(from: object) {
+                return email
+            }
+        }
+        for (_, object) in JSONWalk.dictionaries(in: value) {
+            if let handle = usableHandle(JSONWalk.string(object, keys: [
+                "username", "userName", "user_name", "nickName", "nickname",
+                "displayName", "display_name", "preferred_username", "handle", "login"
+            ])) {
+                return handle
+            }
+        }
+        for (_, object) in JSONWalk.dictionaries(in: value) {
+            if let id = usableHandle(JSONWalk.string(object, keys: [
+                "userId", "user_id", "uid", "accountId", "account_id"
+            ])) {
+                return shortenID(id)
+            }
+        }
+        return nil
+    }
+
+    static func fromToken(_ token: String) -> String? {
+        guard let payload = JWT.payload(token) else { return nil }
+        if let email = CodexCLIAuth.email(from: payload) {
+            return email
+        }
+        if let handle = usableHandle(JSONWalk.string(payload, keys: [
+            "preferred_username", "username", "name", "handle", "nickname"
+        ])) {
+            return handle
+        }
+        if let sub = JWT.trailingSubject(token) {
+            return shortenID(sub)
+        }
+        return nil
+    }
+
+    static func resolve(json: Any, token: String?) -> String? {
+        fromJSON(json) ?? token.flatMap(fromToken)
+    }
+
+    static func usableHandle(_ raw: String?) -> String? {
+        let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty, trimmed.count <= 80, !trimmed.contains("\n") else { return nil }
+        let lower = trimmed.lowercased()
+        let banned: Set<String> = [
+            "pro", "free", "plus", "max", "lite", "prolite", "unknown",
+            "null", "undefined", "none", "user", "account", "glm", "coding"
+        ]
+        if banned.contains(lower) { return nil }
+        if lower.hasPrefix("{") || lower.hasPrefix("[") { return nil }
+        return trimmed
+    }
+
+    static func shortenID(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if trimmed.count <= 18 { return trimmed }
+        if trimmed.contains("@") { return usableHandle(trimmed) }
+        return String(trimmed.prefix(8)) + "…"
+    }
+}
+
 enum Percent {
     static func remaining(used: Double) -> Double {
         max(0, 100 - used)
