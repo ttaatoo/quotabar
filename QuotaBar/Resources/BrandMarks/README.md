@@ -12,4 +12,4 @@ Files are copied from official brand pages, press kits, or official repos. They 
 | `BrandGLM` | `GLM.svg` | Z.ai logomark | [z-cdn.chatglm.cn/z-ai/static/logo.svg](https://z-cdn.chatglm.cn/z-ai/static/logo.svg); Wikimedia [Z.ai (company logo).svg](https://commons.wikimedia.org/wiki/File:Z.ai_(company_logo).svg) from [chat.z.ai](https://chat.z.ai/) |
 | `BrandGrok` | `Grok.svg` | Grok logomark (light) | [xAI_Grok_Assets.zip](https://data.x.ai/logos/xAI_Grok_Assets.zip) `Grok_Logomark_Light.svg`; guidelines: [x.ai/legal/brand-guidelines](https://x.ai/legal/brand-guidelines) |
 
-Not fetched at runtime. Unused Illustrator CSS in the Z.ai source file was stripped so AppKit can paint the official fills; paths and colors are unchanged. Cursor cube CSS class fills were written as presentation attributes for the same reason.
+Not fetched at runtime. Unused Illustrator CSS in the Z.ai source file was stripped so AppKit can paint the official fills; paths and colors are unchanged. Cursor cube CSS class fills were written as presentation attributes for the same reason. The OpenCode compound path sets `fill-rule="evenodd"` so the official O hole punches in AppKit.
