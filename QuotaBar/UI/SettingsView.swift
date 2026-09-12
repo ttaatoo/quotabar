@@ -372,7 +372,8 @@ struct SettingsView: View {
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
-                    .frame(width: 180, minHeight: Theme.settingsHitTarget)
+                    .frame(width: 180)
+                    .frame(minHeight: Theme.settingsHitTarget)
                     .tint(Theme.settingsAccent)
                 }
             }
