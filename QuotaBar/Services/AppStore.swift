@@ -145,7 +145,7 @@ final class AppStore: ObservableObject {
                 return AccountCardRow(
                     id: row.id.uuidString,
                     email: row.account?.email ?? row.state.snapshot?.accountEmail,
-                    fallbackTitle: row.account?.label ?? "OpenCode",
+                    fallbackTitle: row.account?.label ?? ambientOpenCodeGoTitle,
                     state: row.state,
                     hasCredentials: credentials
                 )
@@ -1010,12 +1010,79 @@ extension AppStore {
         case .ready, .loading, .failure:
             return [OpenCodeGoDisplayRow(id: Self.implicitOpenCodeGoID, account: nil, state: implicit)]
         case .idle:
-            if settings.previewFixtures {
+            if settings.previewFixtures || OpenCodeGoClient.resolveToken(explicit: nil) != nil {
                 return [OpenCodeGoDisplayRow(id: Self.implicitOpenCodeGoID, account: nil, state: implicit)]
             }
             return []
         case .signedOut:
+            if OpenCodeGoClient.resolveToken(explicit: nil) != nil {
+                return [OpenCodeGoDisplayRow(id: Self.implicitOpenCodeGoID, account: nil, state: implicit)]
+            }
             return []
+        }
+    }
+
+    /// True when Settings should show the env/implicit OpenCode row instead of an empty state.
+    var hasAmbientOpenCodeGoSource: Bool {
+        guard settings.opencodeGoAccounts.isEmpty else { return false }
+        if OpenCodeGoClient.resolveToken(explicit: nil) != nil { return true }
+        if settings.previewFixtures { return true }
+        switch states[.opencodeGo] ?? .idle {
+        case .ready, .loading, .failure:
+            return true
+        case .idle, .signedOut:
+            return false
+        }
+    }
+
+    var canImportAmbientOpenCodeGo: Bool {
+        settings.opencodeGoAccounts.isEmpty && OpenCodeGoClient.resolveToken(explicit: nil) != nil
+    }
+
+    var ambientOpenCodeGoVariableName: String? {
+        OpenCodeGoClient.ambientEnvironmentVariableName()
+    }
+
+    var ambientOpenCodeGoTitle: String {
+        if let email = states[.opencodeGo]?.snapshot?.accountEmail, !email.isEmpty {
+            return email
+        }
+        if ambientOpenCodeGoVariableName != nil {
+            return "OpenCode (env)"
+        }
+        if settings.previewFixtures {
+            return "OpenCode (preview)"
+        }
+        return "OpenCode"
+    }
+
+    var ambientOpenCodeGoSubtitle: String {
+        if let name = ambientOpenCodeGoVariableName {
+            return "Using \(name)"
+        }
+        if settings.previewFixtures {
+            return "Preview fixtures"
+        }
+        return "Ambient OpenCode key"
+    }
+
+    var ambientOpenCodeGoStatus: String {
+        switch states[.opencodeGo] ?? .idle {
+        case .ready(let snapshot):
+            if let remaining = snapshot.mostConstrainedRemaining {
+                let percent = Int(remaining.rounded())
+                if let plan = snapshot.planName, !plan.isEmpty {
+                    return "\(plan) · \(percent)% left"
+                }
+                return "\(percent)% left"
+            }
+            return snapshot.planName.map { "Live \($0) quota" } ?? "Live quota"
+        case .loading:
+            return "Refreshing quota"
+        case .failure(let message), .signedOut(let message):
+            return message
+        case .idle:
+            return "Refresh to load quota"
         }
     }
 
@@ -1080,6 +1147,21 @@ extension AppStore {
         opencodeGoAPIKeys[id] = ""
         opencodeGoStates[id] = .idle
         persistSettings()
+        return id
+    }
+
+    /// Copies the ambient env key into a Keychain account. Does not run unless the user asks.
+    @discardableResult
+    func importAmbientOpenCodeGoAccount() -> UUID? {
+        guard canImportAmbientOpenCodeGo else { return nil }
+        guard let token = OpenCodeGoClient.resolveToken(explicit: nil) else { return nil }
+        let id = addOpenCodeGoAccount(label: "OpenCode")
+        setOpenCodeGoAPIKey(token, for: id)
+        if case .ready(let snapshot) = states[.opencodeGo] {
+            opencodeGoStates[id] = .ready(snapshot)
+            recordOpenCodeGoEmail(snapshot.accountEmail, for: id)
+        }
+        Task { await refreshOpenCodeGoAccount(id, userInitiated: true) }
         return id
     }
 

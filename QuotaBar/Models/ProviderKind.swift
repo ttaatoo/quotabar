@@ -65,7 +65,7 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable, Hashable, Sendab
         case .grok:
             return "Add a Grok account in Settings. Run `grok login`, or paste a SuperGrok bearer."
         case .opencodeGo:
-            return "Add an OpenCode Go API key in Settings."
+            return "Add an OpenCode Go API key in Settings, or set OPENCODE_GO_API_KEY / OPENCODE_API_KEY."
         }
     }
 }

@@ -248,28 +248,16 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 16) {
             SettingsPaneHeader(
                 title: SettingsSection.opencodeGo.paneTitle,
-                subtitle: "Paste a Go API key per account. QuotaBar calls GET /zen/go/v1/usage with Bearer only."
+                subtitle: "Paste a Go API key per account. With no accounts saved, QuotaBar uses OPENCODE_GO_API_KEY or OPENCODE_API_KEY from the environment."
             ) {
-                if !store.settings.opencodeGoAccounts.isEmpty {
+                if !store.settings.opencodeGoAccounts.isEmpty || store.hasAmbientOpenCodeGoSource {
                     SettingsSecondaryButton(title: "Add account", systemImage: "plus") {
                         addOpenCodeAccount()
                     }
                 }
             }
 
-            if store.settings.opencodeGoAccounts.isEmpty {
-                SettingsGroup {
-                    SettingsEmptyState(
-                        provider: .opencodeGo,
-                        symbol: ProviderKind.opencodeGo.settingsSymbol,
-                        title: "No OpenCode accounts",
-                        message: "Add an account, then paste a Go API key. QuotaBar also reads OPENCODE_GO_API_KEY when no accounts exist yet.",
-                        actionTitle: "Add account"
-                    ) {
-                        addOpenCodeAccount()
-                    }
-                }
-            } else {
+            if !store.settings.opencodeGoAccounts.isEmpty {
                 SettingsGroup {
                     ForEach(Array(store.settings.opencodeGoAccounts.enumerated()), id: \.element.id) { index, account in
                         if index > 0 {
@@ -279,6 +267,23 @@ struct SettingsView: View {
                     }
                 }
                 SettingsCaption(text: "An optional label is enough. The usage API does not always return an email.")
+            } else if store.hasAmbientOpenCodeGoSource {
+                SettingsGroup {
+                    opencodeAmbientRow
+                }
+                SettingsCaption(text: "This environment key is not stored in Settings. Import copies it into the Keychain. Add account starts a new Keychain row and stops using the environment key until you paste one.")
+            } else {
+                SettingsGroup {
+                    SettingsEmptyState(
+                        provider: .opencodeGo,
+                        symbol: ProviderKind.opencodeGo.settingsSymbol,
+                        title: "No OpenCode accounts",
+                        message: "Add an account and paste a Go API key. QuotaBar can also use OPENCODE_GO_API_KEY or OPENCODE_API_KEY from the environment when no accounts are saved.",
+                        actionTitle: "Add account"
+                    ) {
+                        addOpenCodeAccount()
+                    }
+                }
             }
         }
     }
@@ -536,6 +541,59 @@ struct SettingsView: View {
                 .padding(.top, 4)
             }
         }
+    }
+
+    private var opencodeAmbientRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 10) {
+                SettingsProviderWell(provider: .opencodeGo, size: 22, iconSize: 13)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(store.ambientOpenCodeGoTitle)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.settingsPrimary)
+                        .lineLimit(1)
+                    Text(store.ambientOpenCodeGoSubtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.settingsSecondary)
+                        .lineLimit(1)
+                    Text(store.ambientOpenCodeGoStatus)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.settingsSecondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if store.canImportAmbientOpenCodeGo {
+                    SettingsSecondaryButton(title: "Import", systemImage: "square.and.arrow.down") {
+                        _ = store.importAmbientOpenCodeGoAccount()
+                    }
+                }
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("API key")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.settingsSecondary)
+                Text(store.ambientOpenCodeGoVariableName ?? "Environment")
+                    .font(.system(size: 12.5).monospaced())
+                    .foregroundStyle(Theme.settingsPrimary)
+                    .lineLimit(1)
+                    .padding(.horizontal, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(minHeight: Theme.settingsFieldHeight)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(Theme.settingsFieldFill)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .strokeBorder(Theme.settingsHairline, lineWidth: 1)
+                    )
+                    .accessibilityLabel("API key source")
+                    .accessibilityValue(store.ambientOpenCodeGoVariableName ?? "Environment")
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
     }
 
     private func opencodeAccountRow(_ account: OpenCodeGoAccount) -> some View {
@@ -831,7 +889,7 @@ private extension ProviderKind {
         case .grok:
             return "Multi-account SuperGrok bearers / grok login"
         case .opencodeGo:
-            return "Multi-account Go API keys"
+            return "Go API keys, or OPENCODE_API_KEY"
         }
     }
 }
