@@ -20,6 +20,9 @@ enum HTTPClient {
         config.httpCookieAcceptPolicy = .never
         config.urlCache = nil
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.waitsForConnectivity = false
+        config.timeoutIntervalForRequest = RefreshWork.httpTimeout
+        config.timeoutIntervalForResource = RefreshWork.providerTimeout
         let delegate = RedirectDelegate(followRedirects: followRedirects)
         return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
     }
@@ -27,7 +30,7 @@ enum HTTPClient {
     static func get(
         url: URL,
         headers: [String: String] = [:],
-        timeout: TimeInterval = 20,
+        timeout: TimeInterval = RefreshWork.httpTimeout,
         followRedirects: Bool = true
     ) async throws -> (Data, HTTPURLResponse) {
         try await request(
@@ -45,7 +48,7 @@ enum HTTPClient {
         url: URL,
         headers: [String: String] = [:],
         body: [String: Any],
-        timeout: TimeInterval = 20,
+        timeout: TimeInterval = RefreshWork.httpTimeout,
         followRedirects: Bool = true
     ) async throws -> (Data, HTTPURLResponse) {
         let data = try JSONSerialization.data(withJSONObject: body)
@@ -84,16 +87,35 @@ enum HTTPClient {
 
         let urlSession = followRedirects ? session : pinnedSession
         do {
-            let (data, response) = try await urlSession.data(for: request)
-            guard let http = response as? HTTPURLResponse else {
+            // Off MainActor + task timeout: URLRequest.timeoutInterval only
+            // fires if the transfer starts. A MainActor-inherited URLSession
+            // wait can hang forever.
+            let raw = try await RefreshWork.withTimeout(seconds: timeout + 5) {
+                let (data, response) = try await urlSession.data(for: request)
+                guard let http = response as? HTTPURLResponse else {
+                    throw QuotaError.network("Unexpected response from \(url.host ?? url.absoluteString).")
+                }
+                return HTTPResult(data: data, statusCode: http.statusCode)
+            }
+            guard let http = HTTPURLResponse(
+                url: url,
+                statusCode: raw.statusCode,
+                httpVersion: nil,
+                headerFields: nil
+            ) else {
                 throw QuotaError.network("Unexpected response from \(url.host ?? url.absoluteString).")
             }
-            return (data, http)
+            return (raw.data, http)
         } catch let error as QuotaError {
             throw error
         } catch {
             throw QuotaError.network(error.localizedDescription)
         }
+    }
+
+    private struct HTTPResult: Sendable {
+        var data: Data
+        var statusCode: Int
     }
 
     static func requireOK(_ response: HTTPURLResponse, data: Data, host: String) throws {

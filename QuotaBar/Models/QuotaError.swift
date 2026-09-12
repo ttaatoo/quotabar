@@ -1,6 +1,6 @@
 import Foundation
 
-enum QuotaError: LocalizedError, Equatable {
+enum QuotaError: LocalizedError, Equatable, Sendable {
     case notSignedIn(String)
     case unauthorized(String)
     case http(Int, String)

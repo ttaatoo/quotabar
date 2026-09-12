@@ -1,12 +1,12 @@
 import Foundation
 
-enum SnapshotSource: String, Equatable {
+enum SnapshotSource: String, Equatable, Sendable {
     case live
     case fixture
     case pastedJSON
 }
 
-struct UsageWindow: Equatable {
+struct UsageWindow: Equatable, Sendable {
     var title: String
     var remainingPercent: Double
     var usedPercent: Double
@@ -44,7 +44,7 @@ struct UsageWindow: Equatable {
     }
 }
 
-struct UsageSnapshot: Equatable {
+struct UsageSnapshot: Equatable, Sendable {
     var provider: ProviderKind
     var planName: String?
     var fetchedAt: Date
@@ -105,7 +105,7 @@ struct UsageSnapshot: Equatable {
 
 /// ChatGPT / `wham/usage` lanes by **duration**, not primary/secondary slot.
 /// Plus and Codex often put a 7-day (10080 min) window in `primary` with no 5-hour session.
-enum QuotaWindowKind: String, Equatable {
+enum QuotaWindowKind: String, Equatable, Sendable {
     case session
     case weekly
     case monthly
@@ -211,7 +211,7 @@ enum QuotaWindowKind: String, Equatable {
     }
 }
 
-enum ProviderLoadState: Equatable {
+enum ProviderLoadState: Equatable, Sendable {
     case idle
     case loading
     case ready(UsageSnapshot)

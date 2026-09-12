@@ -9,7 +9,7 @@ enum CodexCLIAuth {
     static let oauthClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
     static let defaultRefreshURL = URL(string: "https://auth.openai.com/oauth/token")!
 
-    struct Tokens: Equatable {
+    struct Tokens: Equatable, Sendable {
         var accessToken: String
         var refreshToken: String?
         var idToken: String?
@@ -105,7 +105,9 @@ enum CodexCLIAuth {
             return tokens
         }
         do {
-            return try await refreshAndPersist(tokens: tokens, refreshToken: refreshToken, home: homeURL)
+            return try await RefreshWork.withTimeout(seconds: RefreshWork.oauthTimeout) {
+                try await refreshAndPersist(tokens: tokens, refreshToken: refreshToken, home: homeURL)
+            }
         } catch {
             if expired || forceRefresh {
                 throw error
@@ -126,7 +128,8 @@ enum CodexCLIAuth {
                 "client_id": oauthClientID,
                 "grant_type": "refresh_token",
                 "refresh_token": refreshToken
-            ]
+            ],
+            timeout: RefreshWork.oauthTimeout
         )
         if response.statusCode == 401 || response.statusCode == 403 {
             let object = (try? JSONWalk.object(from: data)) ?? [:]

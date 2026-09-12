@@ -1,6 +1,6 @@
 import Foundation
 
-enum ProviderKind: String, CaseIterable, Identifiable, Codable, Hashable {
+enum ProviderKind: String, CaseIterable, Identifiable, Codable, Hashable, Sendable {
     case cursor
     case chatgpt
     case glm
@@ -70,7 +70,7 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable, Hashable {
     }
 }
 
-enum DisplayMode: String, Codable, CaseIterable, Identifiable {
+enum DisplayMode: String, Codable, CaseIterable, Identifiable, Sendable {
     case remaining
     case used
 
@@ -84,7 +84,7 @@ enum DisplayMode: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-enum GLMRegion: String, Codable, CaseIterable, Identifiable {
+enum GLMRegion: String, Codable, CaseIterable, Identifiable, Sendable {
     case global
     case china
 
