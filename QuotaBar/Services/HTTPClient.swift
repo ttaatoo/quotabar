@@ -86,12 +86,14 @@ enum HTTPClient {
         }
 
         let urlSession = followRedirects ? session : pinnedSession
+        // Swift 5.10 rejects capturing a mutable `var` across withTimeout.
+        let preparedRequest = request
         do {
             // Off MainActor + task timeout: URLRequest.timeoutInterval only
             // fires if the transfer starts. A MainActor-inherited URLSession
             // wait can hang forever.
             let raw = try await RefreshWork.withTimeout(seconds: timeout + 5) {
-                let (data, response) = try await urlSession.data(for: request)
+                let (data, response) = try await urlSession.data(for: preparedRequest)
                 guard let http = response as? HTTPURLResponse else {
                     throw QuotaError.network("Unexpected response from \(url.host ?? url.absoluteString).")
                 }
