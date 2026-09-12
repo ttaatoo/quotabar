@@ -216,7 +216,7 @@ No shadows. Depth is a three-step night stack: rail darker than page, group ligh
 - **Do** keep Settings in the Night Menu Extra register: dark, dense, native.
 - **Do** put every Settings color through `Theme` tokens.
 - **Do** collapse Advanced cookie/JSON by default.
-- **Do** teach empty ChatGPT, Grok, and OpenCode lists with a next action.
+- **Do** teach empty ChatGPT, Grok, OpenCode, and Cursor panes with a next action. Cursor opens Cursor.app (not a fake OAuth window).
 - **Do** leave existing Keychain account names and `config.json` keys unchanged; new Grok account keys are additive.
 
 ### Don't:

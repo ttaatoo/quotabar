@@ -553,10 +553,22 @@ struct SettingsEmptyState: View {
 
 struct SettingsAdvancedDisclosure<Content: View>: View {
     let title: String
-    @ViewBuilder var content: () -> Content
+    let startsExpanded: Bool
+    let content: () -> Content
 
-    @State private var expanded = false
+    @State private var expanded: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(
+        title: String,
+        startsExpanded: Bool = false,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.title = title
+        self.startsExpanded = startsExpanded
+        self.content = content
+        _expanded = State(initialValue: startsExpanded)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

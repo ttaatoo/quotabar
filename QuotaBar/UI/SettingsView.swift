@@ -16,6 +16,8 @@ struct SettingsView: View {
     @State private var renameLabel = ""
     @State private var deleteKind: AccountKind = .chatgpt
     @State private var deleteID: UUID?
+    @State private var cursorLaunchNote: String?
+    @State private var cursorLaunchIsError = false
     @FocusState private var focusedField: String?
 
     var body: some View {
@@ -185,24 +187,62 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 16) {
             SettingsPaneHeader(
                 title: SettingsSection.cursor.paneTitle,
-                subtitle: "Leave the cookie empty to use the local Cursor.app token."
-            )
-            SettingsGroup {
-                statusRow(
-                    title: cursorStatusTitle,
-                    subtitle: cursorStatusSubtitle
-                )
-                SettingsInsetHairline()
-                SettingsLabeledField(label: "Cookie (optional)") {
-                    SettingsSecretField(
-                        placeholder: "WorkosCursorSessionToken or Cookie header",
-                        text: $store.cursorCookie,
-                        focusID: "cursor.cookie",
-                        focusedField: $focusedField
-                    )
+                subtitle: "QuotaBar reads the local Cursor.app session. There is no Cursor login CLI — sign in inside Cursor.app, then Refresh."
+            ) {
+                if !cursorShowsEmptyState {
+                    SettingsSecondaryButton(title: "Open Cursor", systemImage: "arrow.up.forward.app") {
+                        openCursorToSignIn()
+                    }
                 }
             }
-            SettingsCaption(text: "Or paste a WorkosCursorSessionToken / full Cookie header.")
+
+            SettingsGroup {
+                if cursorShowsEmptyState {
+                    SettingsEmptyState(
+                        provider: .cursor,
+                        symbol: ProviderKind.cursor.settingsSymbol,
+                        title: cursorEmptyTitle,
+                        message: cursorEmptyMessage,
+                        actionTitle: "Open Cursor to sign in",
+                        actionSystemImage: "arrow.up.forward.app"
+                    ) {
+                        openCursorToSignIn()
+                    }
+                } else {
+                    statusRow(
+                        title: cursorStatusTitle,
+                        subtitle: cursorStatusSubtitle
+                    )
+                }
+                if let cursorLaunchNote, !cursorLaunchNote.isEmpty {
+                    SettingsCaption(
+                        text: cursorLaunchNote,
+                        tone: cursorLaunchIsError ? .warning : .secondary
+                    )
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 10)
+                }
+                SettingsInsetHairline()
+                SettingsAdvancedDisclosure(title: "Advanced", startsExpanded: hasPastedCursorCookie) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        SettingsCaption(text: "Leave empty unless you paste a fresh WorkosCursorSessionToken or Cookie header. A stale paste can keep returning 403 after you re-sign in.")
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Cookie (optional)")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(Theme.settingsSecondary)
+                            SettingsSecretField(
+                                placeholder: "WorkosCursorSessionToken or Cookie header",
+                                text: $store.cursorCookie,
+                                focusID: "cursor.cookie",
+                                focusedField: $focusedField
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 4)
+                }
+            }
+            SettingsCaption(text: cursorFooterCaption, tone: cursorSessionRejected ? .warning : .secondary)
         }
     }
 
@@ -737,14 +777,81 @@ struct SettingsView: View {
         if let email = store.cursorEmail, !email.isEmpty {
             return email
         }
-        return "Cursor.app token"
+        return "Signed in"
     }
 
     private var cursorStatusSubtitle: String {
         if let email = store.cursorEmail, !email.isEmpty {
-            return "Signed in. Cookie paste is an optional fallback."
+            return "Using the local Cursor.app session. Leave Advanced empty unless you paste a fresh cookie."
         }
-        return "No email from Cursor yet. Sign in to Cursor.app, or paste a cookie below."
+        return "Local Cursor.app session is working. Email appears when Cursor publishes one."
+    }
+
+    private var cursorShowsEmptyState: Bool {
+        if cursorSessionRejected { return true }
+        guard let state = store.states[.cursor] else {
+            return store.cursorEmail == nil
+        }
+        switch state {
+        case .ready:
+            return false
+        case .signedOut, .failure:
+            return true
+        case .loading, .idle:
+            return store.cursorEmail == nil
+        }
+    }
+
+    private var cursorEmptyTitle: String {
+        cursorSessionRejected ? "Session rejected" : "Not signed in"
+    }
+
+    private var cursorEmptyMessage: String {
+        if cursorSessionRejected {
+            return "cursor.com rejected the local session. Re-sign in inside Cursor.app, leave Advanced empty, then Refresh."
+        }
+        return "Open Cursor.app and sign in. QuotaBar reads that local session."
+    }
+
+    private var cursorFooterCaption: String {
+        if cursorSessionRejected {
+            return "cursor.com rejected the local session. Re-sign in inside Cursor.app. Leave Advanced empty unless you paste a fresh WorkosCursorSessionToken."
+        }
+        return "Leave Advanced empty unless you paste a fresh WorkosCursorSessionToken."
+    }
+
+    private var cursorSessionRejected: Bool {
+        switch store.states[.cursor] {
+        case .signedOut(let message), .failure(let message):
+            return CursorAuth.isRejectedSessionMessage(message)
+        default:
+            return false
+        }
+    }
+
+    private var hasPastedCursorCookie: Bool {
+        !store.cursorCookie.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func openCursorToSignIn() {
+        Task { @MainActor in
+            await performOpenCursor()
+        }
+    }
+
+    @MainActor
+    private func performOpenCursor() async {
+        switch await CursorAppLauncher.open() {
+        case .launchedApp:
+            cursorLaunchIsError = false
+            cursorLaunchNote = "Opened Cursor.app. Sign in there, leave Advanced empty, then Refresh."
+        case .openedWebsite:
+            cursorLaunchIsError = true
+            cursorLaunchNote = "Cursor.app is not installed. Opened cursor.com — install Cursor, sign in, then Refresh."
+        case .failed(let message):
+            cursorLaunchIsError = true
+            cursorLaunchNote = message
+        }
     }
 
     private var glmStatusTitle: String {
@@ -927,7 +1034,7 @@ private extension ProviderKind {
     var settingsBlurb: String {
         switch self {
         case .cursor:
-            return "Local Cursor.app token, optional cookie"
+            return "Sign in inside Cursor.app"
         case .chatgpt:
             return "Multi-account via `codex login`"
         case .glm:

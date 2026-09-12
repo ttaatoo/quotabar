@@ -6,7 +6,7 @@ product
 
 ## Users
 
-Power users who already pay for Cursor, ChatGPT, GLM, Grok, and/or OpenCode Go. They glance at remaining quota from a macOS menu-bar popover, usually at a desk at night, then open Settings only to paste a credential, add an account, or flip a toggle. They are not exploring a settings product; they want the pane to disappear into the task.
+Power users who already pay for Cursor, ChatGPT, GLM, Grok, and/or OpenCode Go. They glance at remaining quota from a macOS menu-bar popover, usually at a desk at night, then open Settings only to sign in, paste a credential, add an account, or flip a toggle. They are not exploring a settings product; they want the pane to disappear into the task.
 
 ## Product Purpose
 

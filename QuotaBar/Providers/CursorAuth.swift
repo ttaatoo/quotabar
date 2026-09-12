@@ -2,6 +2,28 @@ import Foundation
 import SQLite3
 
 enum CursorAuth {
+    /// Popover / Settings hint. Cookie paste is Advanced-only.
+    static let signInHint =
+        "Open Cursor.app and sign in, then Refresh. Leave the optional Settings cookie empty unless you paste a fresh WorkosCursorSessionToken."
+
+    static let notSignedInMessage =
+        "No Cursor session found. Open Cursor.app and sign in, then Refresh."
+
+    static let unauthenticatedMessage =
+        "cursor.com rejected the local session. Re-sign in inside Cursor.app, leave the optional cookie empty, then Refresh."
+
+    static func rejectedSessionMessage(status: Int) -> String {
+        "cursor.com rejected the local session (\(status)). Re-sign in inside Cursor.app, leave the optional cookie empty, then Refresh."
+    }
+
+    static func isRejectedSessionMessage(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        return lower.contains("rejected")
+            || message.contains("403")
+            || message.contains("401")
+            || lower.contains("not authenticated")
+    }
+
     static let defaultDBPath = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Cursor/User/globalStorage/state.vscdb")
 
@@ -21,7 +43,7 @@ enum CursorAuth {
         if let token = readLocalAccessToken() {
             return cookie(fromAccessToken: token)
         }
-        throw QuotaError.notSignedIn("No Cursor session found. Sign in to Cursor.app or paste a WorkosCursorSessionToken in Settings.")
+        throw QuotaError.notSignedIn(notSignedInMessage)
     }
 
     static func cookie(fromAccessToken token: String) -> String {

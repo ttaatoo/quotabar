@@ -11,6 +11,9 @@ enum CursorClient {
 
         let url = URL(string: "https://cursor.com/api/usage-summary")!
         let (data, response) = try await HTTPClient.get(url: url, headers: headers)
+        if response.statusCode == 401 || response.statusCode == 403 {
+            throw QuotaError.unauthorized(CursorAuth.rejectedSessionMessage(status: response.statusCode))
+        }
         try HTTPClient.requireOK(response, data: data, host: "cursor.com")
 
         let object = try JSONWalk.object(from: data)
@@ -20,7 +23,7 @@ enum CursorClient {
 
     static func parse(_ raw: [String: Any], fetchedAt: Date = Date(), email: String? = nil) throws -> UsageSnapshot {
         if raw["error"] as? String == "not_authenticated" {
-            throw QuotaError.unauthorized("Cursor says this session is not authenticated.")
+            throw QuotaError.unauthorized(CursorAuth.unauthenticatedMessage)
         }
 
         let membership = JSONWalk.string(raw, keys: ["membershipType", "plan", "planType"]) ?? "Pro"
