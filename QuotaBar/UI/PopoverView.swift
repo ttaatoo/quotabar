@@ -375,10 +375,16 @@ struct AccountCard: View {
             )
         } else {
             EmptyStateView(
-                title: "Not signed in",
+                title: cursorSignedOutTitle(message),
                 message: shortFailure(message),
-                actionTitle: "Settings",
-                action: onOpenSettings,
+                actionTitle: provider == .cursor ? "Open Cursor" : "Settings",
+                action: {
+                    if provider == .cursor {
+                        Task { _ = await CursorAppLauncher.open() }
+                    } else {
+                        onOpenSettings()
+                    }
+                },
                 onSelect: onActivate
             )
         }
@@ -391,8 +397,8 @@ struct AccountCard: View {
         if case .ready(let snapshot) = row.state, let email = snapshot.accountEmail, !email.isEmpty {
             return email
         }
-        if case .signedOut = row.state, !hasKnownEmail, !row.hasCredentials {
-            return "Not signed in"
+        if case .signedOut(let message) = row.state, !hasKnownEmail, !row.hasCredentials {
+            return cursorSignedOutTitle(message)
         }
         if case .failure = row.state {
             return row.fallbackTitle
@@ -416,6 +422,13 @@ struct AccountCard: View {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.count <= 140 { return trimmed }
         return String(trimmed.prefix(137)) + "…"
+    }
+
+    private func cursorSignedOutTitle(_ message: String) -> String {
+        if provider == .cursor, CursorAuth.isRejectedSessionMessage(message) {
+            return "Session rejected"
+        }
+        return "Not signed in"
     }
 }
 
