@@ -80,6 +80,7 @@ enum Theme {
     static let settingsMinHeight: CGFloat = 480
     static let settingsSidebarWidth: CGFloat = 172
     static let settingsContentPadding: CGFloat = 22
+    static let settingsContentMaxWidth: CGFloat = 560
     static let settingsGroupRadius: CGFloat = 10
     static let settingsCardRadius: CGFloat = 10
     static let settingsRowHeight: CGFloat = 36

@@ -16,7 +16,6 @@ struct SettingsView: View {
     @State private var deleteKind: AccountKind = .chatgpt
     @State private var deleteID: UUID?
     @FocusState private var focusedField: String?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 0) {
@@ -132,6 +131,7 @@ struct SettingsView: View {
             .padding(.horizontal, Theme.settingsContentPadding)
             .padding(.top, 20)
             .padding(.bottom, 24)
+            .frame(maxWidth: Theme.settingsContentMaxWidth, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .scrollBounceBehavior(.basedOnSize)
@@ -164,7 +164,7 @@ struct SettingsView: View {
     private var providersPane: some View {
         VStack(alignment: .leading, spacing: 16) {
             SettingsPaneHeader(
-                title: "Providers",
+                title: SettingsSection.providers.paneTitle,
                 subtitle: "Turn off a provider to hide it from the popover. Credentials stay saved."
             )
             SettingsGroup {
@@ -182,7 +182,7 @@ struct SettingsView: View {
     private var cursorPane: some View {
         VStack(alignment: .leading, spacing: 16) {
             SettingsPaneHeader(
-                title: "Cursor",
+                title: SettingsSection.cursor.paneTitle,
                 subtitle: "Leave the cookie empty to use the local Cursor.app token."
             )
             SettingsGroup {
@@ -207,7 +207,7 @@ struct SettingsView: View {
     private var chatgptPane: some View {
         VStack(alignment: .leading, spacing: 16) {
             SettingsPaneHeader(
-                title: "ChatGPT",
+                title: SettingsSection.chatgpt.paneTitle,
                 subtitle: "Add account runs `codex login` in your default browser. Extra accounts use a private Codex home so ~/.codex/auth.json is not overwritten."
             ) {
                 if !store.settings.chatgptAccounts.isEmpty {
@@ -244,7 +244,7 @@ struct SettingsView: View {
     private var opencodeGoPane: some View {
         VStack(alignment: .leading, spacing: 16) {
             SettingsPaneHeader(
-                title: "OpenCode Go",
+                title: SettingsSection.opencodeGo.paneTitle,
                 subtitle: "Paste a Go API key per account. QuotaBar calls GET /zen/go/v1/usage with Bearer only."
             ) {
                 if !store.settings.opencodeGoAccounts.isEmpty {
@@ -282,7 +282,7 @@ struct SettingsView: View {
     private var glmPane: some View {
         VStack(alignment: .leading, spacing: 16) {
             SettingsPaneHeader(
-                title: "GLM",
+                title: SettingsSection.glm.paneTitle,
                 subtitle: "Stored in the Keychain. Also accepted from ~/.config/quotabar/config.json or Z_AI_API_KEY."
             )
             SettingsGroup {
@@ -313,7 +313,7 @@ struct SettingsView: View {
     private var grokPane: some View {
         VStack(alignment: .leading, spacing: 16) {
             SettingsPaneHeader(
-                title: "Grok",
+                title: SettingsSection.grok.paneTitle,
                 subtitle: "QuotaBar reads ~/.grok/auth.json from `grok login`. It never writes or refreshes that file."
             )
             SettingsGroup {
@@ -346,7 +346,7 @@ struct SettingsView: View {
     private var displayPane: some View {
         VStack(alignment: .leading, spacing: 16) {
             SettingsPaneHeader(
-                title: "Display",
+                title: SettingsSection.display.paneTitle,
                 subtitle: "How often QuotaBar polls, and how the menu-bar number reads."
             )
             SettingsGroup {
@@ -613,13 +613,7 @@ struct SettingsView: View {
     }
 
     private func select(_ item: SettingsSection) {
-        if reduceMotion {
-            section = item
-        } else {
-            withAnimation(.easeOut(duration: Theme.settingsMotion)) {
-                section = item
-            }
-        }
+        section = item
     }
 
     private func moveSection(_ direction: MoveCommandDirection) {

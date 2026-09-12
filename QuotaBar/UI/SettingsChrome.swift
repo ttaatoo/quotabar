@@ -116,6 +116,7 @@ struct SettingsNavItem: View {
             }
             .padding(.horizontal, 8)
             .frame(height: 28)
+            .contentShape(Rectangle())
             .background(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(selected ? Theme.settingsSelectedFill : (hovering ? Theme.settingsHoverFill : Color.clear))
@@ -151,6 +152,7 @@ struct SettingsPaneHeader<Trailing: View>: View {
                 Text(title)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Theme.settingsPrimary)
+                    .accessibilityAddTraits(.isHeader)
                 if !subtitle.isEmpty {
                     Text(subtitle)
                         .font(.system(size: 12))
