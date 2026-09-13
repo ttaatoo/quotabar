@@ -1,25 +1,27 @@
 # QuotaBar
 
-A menu-bar-only macOS 14+ utility (version **0.0.16**) that shows remaining **Cursor**, **ChatGPT**, **GLM** (z.ai / BigModel coding plan), **Grok** (consumer SuperGrok), and **OpenCode Go** subscription quota. One dark pill in the status bar, one compact popover. No Dock icon, no telemetry.
+A menu-bar-only macOS 14+ utility (**0.0.16**) that shows remaining **Cursor**, **ChatGPT**, **GLM**, **Grok**, and **OpenCode Go** quota. One pill in the status bar, one compact popover. No Dock icon, no telemetry.
 
-QuotaBar is an independent implementation. It talks to the same unofficial usage endpoints those products’ own dashboards already call. Those endpoints can change or break without notice.
+## Screenshots
+
+**All providers**
+
+![All providers](docs/screenshots/popover-all-mock.png)
+
+**Settings**
+
+![Settings](docs/screenshots/settings-mock.png)
 
 ## Install
-
-Ad-hoc signed (no Apple Developer ID). On your Mac:
 
 ```bash
 brew tap ttaatoo/quotabar https://github.com/ttaatoo/quotabar
 brew install --cask ttaatoo/quotabar/quotabar
 ```
 
-Upgrade:
+Upgrade: `brew upgrade --cask ttaatoo/quotabar/quotabar`.
 
-```bash
-brew upgrade --cask ttaatoo/quotabar/quotabar
-```
-
-If Gatekeeper blocks the app:
+The cask is ad-hoc signed (no Apple Developer ID). If Gatekeeper blocks it:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/QuotaBar.app
@@ -27,20 +29,23 @@ xattr -dr com.apple.quarantine /Applications/QuotaBar.app
 
 Then **System Settings → Privacy & Security → Open Anyway**.
 
-To build from `main` instead of the cask: `brew install --formula --HEAD ttaatoo/quotabar/quotabar`. After a formula install, clear quarantine on the cellar prefix (`xattr -dr com.apple.quarantine "$(brew --prefix quotabar)/QuotaBar.app"`). Optional: `ln -sf "$(brew --prefix quotabar)/QuotaBar.app" /Applications/QuotaBar.app`
+To run `main` instead of the cask: `brew install --formula --HEAD ttaatoo/quotabar/quotabar`, then clear quarantine on the cellar app (`xattr -dr com.apple.quarantine "$(brew --prefix quotabar)/QuotaBar.app"`).
 
-## What you get
+## Features
 
-- Status item: dark rounded pill with a small bar-chart mark and a percentage. ChatGPT, Grok, and OpenCode Go use the **active** account’s remaining % (click a card in the popover to choose; the choice is saved in `~/.config/quotabar/config.json`). Cursor uses the **higher** remaining of Cursor Models / Other Models, and turns orange if **either** pool is below 25% remaining (or 0%). GLM, Grok, and OpenCode Go use the most-constrained window. The number turns orange below 25% remaining.
-- Popover (not a detached window): fixed compact chrome (`320×360`) so switching tabs does not rewrite `contentSize` or move the arrow. The first pill is **All** (Overall): every enabled provider in a scrollable list of compact rows (brand mark, email/label, plan or status, one primary bar for the tightest remaining window, `% left` / `% used`, reset chip). Tapping a row opens that provider’s existing account-card detail and, for ChatGPT / Grok / OpenCode, activates that account for the menu bar. Empty providers still show a signed-out row so Settings is discoverable. New installs and configs without `popoverTab` land on All; the last single-provider tab is still stored as `selectedProvider` for the menu-bar pill (not a global tightest %). Header is the same for every tab: mark, title (All or provider), “Updated …” (All or a multi-account provider with two or more rows prefixes `N accounts ·`), refresh — **email is never in the subtitle**. Refresh on All fans out with the same parallel `refreshAll` path. Provider pills stay one compact row (**All**, short **Go** title; overflow scrolls rather than wrapping). Single-provider bodies stay the same top-aligned `ScrollView` of hugging account cards (email or “Not signed in” / a short hint, plan badge, that account’s meters with a reset chip per window, Credits / On-demand, and plan expiry when the API publishes one). Cards never stretch to fill leftover body space — that leftover is the popover background. ChatGPT, Grok, and OpenCode stack one card per account; Cursor / GLM are one card each. Empty Session / Weekly / Monthly windows are omitted. Settings… and Quit QuotaBar stay in the footer.
-- Settings: same dark Theme as the popover. Sidebar and account wells use bundled brand marks (not SF Symbols). Enable each provider (including OpenCode), add / rename / delete ChatGPT, Grok, and OpenCode Go accounts (ChatGPT Add account or Re-login runs `codex login` in the default browser; Grok Add account or Re-login runs `grok login --oauth`), Cursor **Open Cursor to sign in** (cookie paste stays under Advanced), paste GLM credentials in compact secret fields, GLM region, poll interval (default 120s), remaining vs used, launch at login (`SMAppService`), and an off-by-default **Preview fixtures** toggle for screenshots.
-
-If a provider is not signed in, you see a “Sign in / add key” empty state — never fake 100% bars.
+- Status-item pill with remaining % (orange below 25%)
+- **All** overview of every enabled provider; click a row to open that account
+- Per-provider cards with plan, meters, and reset times
+- Multi-account ChatGPT, Grok, and OpenCode Go — click a card to choose the menu-bar account
+- Settings: show or hide providers, add / re-login / rename accounts, remaining vs used, poll interval, launch at login
+- ChatGPT signs in with Codex CLI in your default browser; Grok with `grok login --oauth`
+- Cursor uses the local Cursor.app session (there is no public Cursor OAuth)
+- Signed-out providers show a sign-in empty state — never fake 100% bars
 
 ## Requirements
 
 - macOS 14 Sonoma or later
-- Xcode 15.4+ (Swift 5.9+) to build from source / `brew install --HEAD`
+- Xcode 15.4+ (Swift 5.9+) to build from source
 
 ## Build
 
@@ -50,116 +55,33 @@ cd quotabar
 open QuotaBar.xcodeproj
 ```
 
-In Xcode: select the **QuotaBar** scheme, destination **My Mac**, then Run.
+Select the **QuotaBar** scheme, destination **My Mac**, then Run.
 
-Or from the command line:
-
-```bash
-xcodebuild -project QuotaBar.xcodeproj -scheme QuotaBar -configuration Release \
-  MARKETING_VERSION=0.0.16 CURRENT_PROJECT_VERSION=0.0.16 \
-  CODE_SIGN_IDENTITY="-" CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=NO build
-```
-
-Ad-hoc signed app + zip (also used by the Homebrew formula and the `v*` release workflow):
+Release app + zip (Homebrew formula and `v*` GitHub Releases):
 
 ```bash
-chmod +x scripts/package.sh
 ./scripts/package.sh
 ```
 
-That writes `dist/QuotaBar.app` and `dist/QuotaBar.zip` at version 0.0.16, then runs `codesign --force --deep --sign -`.
+Writes `dist/QuotaBar.app` and `dist/QuotaBar.zip`, ad-hoc signed.
 
-Pushing a `v*` tag (or running the Release workflow) uploads `QuotaBar.zip` to a GitHub Release.
+## Setup
 
-## First-run Gatekeeper
+Open **Settings…** from the popover. Secrets stay in the Keychain. Preferences go to `~/.config/quotabar/config.json` — that file must not contain API keys or cookies.
 
-Ad-hoc builds are unsigned by Apple. After downloading or copying the app:
+**Cursor** — Sign in to Cursor.app, then Settings → Cursor → **Open Cursor to sign in**. QuotaBar reads the local session. A dashboard cookie is Advanced-only.
 
-```bash
-xattr -dr com.apple.quarantine /path/to/QuotaBar.app
-```
+**ChatGPT** — Settings → ChatGPT → **Add account** or **Re-login** runs `codex login` in your default browser. The first account can import `~/.codex/auth.json`. Extra accounts use a private Codex home so that file is not overwritten. Install the Codex CLI if it is missing.
 
-If macOS still blocks it: **System Settings → Privacy & Security → Open Anyway**.
+**GLM** — Paste a z.ai / BigModel API token and pick Global or China. `Z_AI_API_KEY`, `GLM_API_KEY`, or `BIGMODEL_API_KEY` also work.
 
-## Adding credentials
+**Grok** — Consumer SuperGrok, not xAI console keys. **Add account** / **Re-login** runs `grok login --oauth` in the browser. Extra accounts use a private Grok home so `~/.grok/auth.json` is not overwritten.
 
-Secrets go in the macOS Keychain (`app.quotabar.QuotaBar`). Non-secret preferences are written to `~/.config/quotabar/config.json` with mode `0600`. That file must never contain API keys or cookies.
-
-### Cursor
-
-1. Sign in to the Cursor desktop app at least once. Settings → Cursor → **Open Cursor to sign in** launches Cursor.app (or [cursor.com](https://cursor.com) if the app is missing). There is **no** public Cursor OAuth / `cursor login` CLI. QuotaBar read-only-opens  
-   `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`  
-   (copies the DB plus WAL/SHM first) and reads `cursorAuth/accessToken`.
-2. If `GET https://cursor.com/api/usage-summary` returns 403 for that local session, re-sign in inside Cursor.app, leave the optional Settings cookie empty, then Refresh.
-3. Optional Advanced fallback: paste a fresh `WorkosCursorSessionToken` cookie (or a full Cookie header) from [cursor.com/dashboard](https://cursor.com/dashboard). Leave it empty unless you intend to override the local token.
-4. Live fetch: `GET https://cursor.com/api/usage-summary`. The two dashboard pools map to **Cursor Models** (Auto + Composer) from `individualUsage.plan.autoPercentUsed` and **Other Models** (named / API) from `apiPercentUsed`. Both reset at `billingCycleEnd`. If `apiPercentUsed` is missing, Other Models is omitted — `totalPercentUsed` is not substituted. Team fallback: `autoModelSelectedDisplayMessage` → Cursor Models, `namedModelSelectedDisplayMessage` → Other Models. On-demand spend stays a footer (`On-demand $x.xx`), never a third percent bar.
-5. Signed-in email is shown **on the Cursor account card** (and on the Settings card) when Cursor publishes one: `usage-summary` if it includes an email field, otherwise `GET https://cursor.com/api/auth/me` (`email`), otherwise the session JWT `email` claim. If none of those have an address, the card says “Email unknown” rather than inventing one. On-demand spend stays inside the card (`On-demand $x.xx`), never a third percent bar.
-
-### ChatGPT (Plus / Pro)
-
-ChatGPT, Grok, and OpenCode Go have **multi-account** support. Cursor and GLM stay single-account. There is no separate Codex provider and **no custom ChatGPT OAuth app**.
-
-QuotaBar uses the same live usage path CodexBar uses:
-
-1. Prefer `GET https://chatgpt.com/backend-api/wham/usage` (then `https://chat.openai.com/backend-api/wham/usage` if needed) with `Authorization: Bearer <token>`, the chatgpt.com session cookie when we have one, and `ChatGPT-Account-Id` when known. Each `rate_limit` window is classified by **duration** (`limit_window_seconds` / `window_seconds` / `windowDurationMins`), not by primary/secondary slot: ≤ ~12h → **Session**, ~3–14d (incl. 10080 min / 7d) → **Weekly**, ~30d (43200 min) → **Monthly**. Plus / Codex often return only a 7-day `primary` and no 5-hour session — that window is Weekly, and the empty Session row is omitted. A lone window whose reset is days away is Weekly, not Session. Countdown uses the real title (`Weekly reset in 5d 13h`). `credits.balance` / unlimited stay footer-only — percentages are never invented from credits.
-2. Tokens come from a chatgpt.com session cookie (Advanced paste) exchanged at `GET /api/auth/session`, **or** `auth.json` written by `codex login` — the same file CodexBar reads (`~/.codex/auth.json`, `$CODEX_HOME/auth.json`, or a private Application Support home). QuotaBar does not start a ChatGPT OAuth app. When that home’s access token is expired (or `wham/usage` 401s), QuotaBar refreshes it with the public Codex CLI client (`POST https://auth.openai.com/oauth/token`, `grant_type=refresh_token`) and writes the rotated tokens back — required for a second managed Codex home, which the CLI does not keep warm. A cookie 401 and a usage 401 are different errors; a saved account shows **Couldn’t refresh** / Retry, not Sign in. **Re-login** on that row runs `codex login` against that account’s home only.
-3. If `~/.codex/auth.json` exists and you have not added a ChatGPT account yet, Refresh uses that file as an implicit source. QuotaBar will not create a new account on every launch.
-4. In Settings → ChatGPT, **Add account** locates the `codex` binary (PATH, Homebrew/npm, ChatGPT.app / Codex.app) and runs `codex login` (or `codex auth login` if that is what the CLI accepts). The CLI opens the **system default browser**. A small status window says “Finish sign-in in your browser…” with Cancel — there is no in-app `WKWebView`. If `~/.codex/auth.json` already exists, the first Add account **imports** it (email from the JWT) without launching login. Extra accounts run login against a private `CODEX_HOME` under `~/Library/Application Support/QuotaBar/managed-codex-homes/` so a second login does not overwrite `~/.codex/auth.json`. After the CLI exits 0, QuotaBar only **reads** that home’s `auth.json`.
-5. If `codex` is missing, Settings tells you to install Codex CLI and/or run `codex login` in Terminal. Cookie / usage JSON stay under **Advanced** as an optional fallback only. Cookie-only Keychain accounts keep working.
-6. **Re-login**, **Rename**, or **Delete** from the same list. Re-login updates that account’s Codex home and does not remove other accounts. Deleting a managed account removes its private Codex home; `~/.codex/auth.json` is never deleted. There is no single global ChatGPT cookie field.
-7. Account metadata (`id`, `label`, `enabled`, optional email, optional `codexHomePath`) and the active account id (`selectedChatGPTAccountId`) live in `~/.config/quotabar/config.json`. Cookies and optional pasted JSON stay in the Keychain as `chatgpt.cookie.<account-id>` and `chatgpt.json.<account-id>`.
-8. Only if `wham/usage` has no usable windows does QuotaBar fall back to  
-   `GET https://chatgpt.com/backend-api/conversation_limit` and  
-   `GET https://chatgpt.com/public-api/conversation_limit`, then optional pasted JSON.
-9. Meters are drawn only when the JSON actually contains remaining/used percentages. JSON without percentages is an honest error — not dummy 80%. A 401 on one account does not wipe the others, and switching the active card does not clear another account’s snapshot. Live HTTP uses an ephemeral, cookie-less `URLSession` so chatgpt.com `Set-Cookie` from account A cannot hitch a ride on account B’s Bearer request. Each fetch also checks the response email against that account’s saved email and falls through to that account’s Codex home when a cookie belongs to someone else. If `wham/usage` 401s with `ChatGPT-Account-Id` (or a cookie+Bearer pair), QuotaBar retries without the extra headers before giving up.
-10. In the popover, pick **ChatGPT**. Every account is listed together as the same compact card used by Cursor / GLM / Grok (email, plan badge, that account’s Weekly / Session meters). Each window keeps its own reset chip (`Weekly reset in …` is still the accessibility string; the chip shows the duration). Session and Weekly both show a chip when both exist. Credits stay on the footer row. If `wham/usage`, the session payload, or `accounts/check` entitlement publishes a subscription end (`expires_at` / `subscription_expires_at` / similar), the footer also shows **Ends …**. Window `resetAt` is never treated as plan expiry. If the API has no expiry field, that label is omitted. Click a card to make it the **active** account (purple ring, tinted fill, and a check). There is no account pill/tab strip and the email is not in the header. Two or three accounts fit in the frozen body; extras scroll. The menu-bar percentage is that active account’s remaining % only (the Weekly number the card already shows; orange below 25%). A single account is active automatically. If the active account is deleted or missing after refresh, QuotaBar falls back to the first remaining signed-in account, or the unsigned-in empty state if none remain. An account with a saved cookie or readable `auth.json` never shows “Not signed in” / Sign in — a failed refresh keeps the last meters or shows “Couldn’t refresh”.
-11. **Refresh** loads every ChatGPT account concurrently (that account’s cookie and/or Codex home), not only the selected one. Enabled providers also refresh in parallel so a ChatGPT hang cannot leave GLM / Grok / OpenCode stuck on “Updating…”. Network work runs off the main actor with timeouts. Background polling does the same. Opening the popover does not flash ready cards back to “Updating…”. A successful Add account also refreshes that account so meters can fill in.
-12. Existing single-cookie / single-JSON installs are migrated to one account labeled **ChatGPT**; credentials are not dropped. If you have no accounts and no readable `auth.json`, the popover shows the usual “Sign in / add key” empty state with a button that opens Settings.
-
-### GLM (z.ai / BigModel coding plan)
-
-1. Paste an API token in Settings, **or** set `Z_AI_API_KEY` / `GLM_API_KEY` / `BIGMODEL_API_KEY`, **or** put a legacy `glmApiKey` in `~/.config/quotabar/config.json` (it is migrated into Keychain and stripped from the file).
-2. Pick a region: **Global** `https://api.z.ai` or **China** `https://open.bigmodel.cn`.
-3. Live fetch: `GET {host}/api/monitor/usage/quota/limit` with `Authorization: Bearer <token>`.
-4. Shortest `TOKENS_LIMIT` (~5h) → Session; longer `TOKENS_LIMIT` (~weekly) → Weekly. `nextResetTime` drives the countdown. `planName` / `level` is the badge. MCP extras stay inside the card footer.
-5. Identity: the quota JSON often has no email. QuotaBar then reads username / id from that JSON, the API-key JWT, or a 2s profile GET (`/api/paas/v4/user`, `/api/monitor/user`, `/api/paas/v4/user/credit_grants`). Settings and the popover card stay consistent. If nothing usable is found, the card shows `GLM <plan>` (or `GLM`) rather than “Email unknown”.
-
-### Grok (consumer SuperGrok)
-
-This is **consumer Grok / SuperGrok**, not the xAI Management API prepaid team balance. QuotaBar does not accept `xai-` console keys. Grok is **multi-account**, like ChatGPT / OpenCode Go.
-
-1. In Settings → Grok, **Add account** / **Re-login** locate the `grok` binary (`GROK_CLI_PATH`, PATH, `~/.grok/bin/grok`, Homebrew) and run `grok login --oauth` (or `grok login` if that flag is unknown). The CLI opens the **system default browser**. There is no custom xAI OAuth client and no in-app web view. If `~/.grok/auth.json` (or `$GROK_HOME/auth.json`) exists and no account uses it yet, the first Add **imports** it without launching login. Extra accounts run login with `GROK_HOME` set to a private home under `~/Library/Application Support/QuotaBar/managed-grok-homes/` so a second login does not overwrite ambient `auth.json`. xAI documents `GROK_HOME` as the home for auth; if a CLI build ignores that for login writes, Settings reports that honestly instead of inventing a client. **Import grok login** stays available when the file exists and is unused. SuperGrok bearer paste is **Advanced** only.
-2. Account metadata (`id`, `label`, `enabled`, optional email, `usesAmbientAuthFile`, optional `grokHomePath`) and `selectedGrokAccountId` live in `~/.config/quotabar/config.json`. Optional pasted bearers stay in the Keychain as `grok.oauth-token.<account-id>`.
-3. Existing single-account installs migrate to one account: a leftover Keychain `grok.oauth-token` is copied onto that row, and `grok login` is marked ambient when the file is present. After the per-account secret, ambient flag, or Grok home exists, the legacy Keychain key is deleted. An explicit empty `grokAccounts` array is not recreated on launch.
-4. Prefer identity + bearer from that account’s Grok home (`grokHomePath`, or ambient `~/.grok/auth.json` for the ambient account). Top-level keys are OIDC scope URLs; QuotaBar prefers `https://auth.x.ai::` (SuperGrok), then `https://accounts.x.ai/sign-in`. Fields used: `key` (bearer), `email`, `expires_at`, `auth_mode`, `team_id`. QuotaBar does **not** refresh or rewrite those files. Delete may remove a managed home; `~/.grok/auth.json` is never deleted.
-5. `GROK_OAUTH_TOKEN` is accepted as an implicit single-account fallback when no Grok accounts have been added yet. `xai-` management keys and cookie-shaped values are rejected on the Advanced bearer field.
-6. Live fetch: `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits` with `Authorization: Bearer <key>`, `x-xai-token-auth: xai-grok-cli`, and `Accept: application/json`.
-7. Used % = `config.creditUsagePercent`, else `onDemandUsed.val / onDemandCap.val * 100`. A parseable current period without those values is **0% used**. Never invent a bar from credits-alone with no period.
-8. Reset = `config.currentPeriod.end`, then `config.billingPeriodEnd`. Window title is Weekly or Monthly from that reset cycle (same classification as ChatGPT), else “Credits”. One real window is enough; empty Session is omitted.
-9. Plan: `GET https://cli-chat-proxy.grok.com/v1/settings` → `subscription_tier_display` (SuperGrok / SuperGrok Heavy), 2s timeout. If that fails, fall back to OIDC SuperGrok / `auth_mode`. Settings never blocks usage. Email / username is taken from `auth.json`, the billing/settings JSON, or the bearer JWT.
-10. The popover lists one card per account. Click a card to select the active account for the menu-bar %. Refresh loads every Grok account concurrently and keeps the last-good snapshot on failure.
-
-### OpenCode Go
-
-OpenCode is multi-account, like ChatGPT, but credentials are API keys (not Codex homes).
-
-1. In Settings → OpenCode Go, **Add account**, optionally rename it, and paste that account’s Go API key. Keys stay in the Keychain as `opencodeGo.apiKey.<account-id>`. Account metadata (`id`, `label`, `enabled`, optional email) and `selectedOpenCodeGoAccountId` live in `~/.config/quotabar/config.json`.
-2. Live fetch: `GET https://opencode.ai/zen/go/v1/usage` with `Authorization: Bearer <api-key>` only (not `x-api-key`). Redirects are not followed, so a rewritten host never receives the key. The same ephemeral cookie-less `URLSession` as the other live clients is used.
-3. 200 body: `{ "usage": { "rolling": { "status", "percent", "resetsAt" }, "weekly": {…}, "monthly": {…} } }`. `percent` is **used** 0–100 (same as the OpenCode dashboard “X% used”). QuotaBar converts to remaining when Display is Remaining (`100 - used`). Map: **rolling → Session** (5h), **weekly → Weekly**, **monthly → Monthly**. Empty windows are omitted. `status` is `ok` or `rate-limited` (still shown; the meter row notes rate-limited).
-4. 401: key missing or unknown. 403: valid key but no Go subscription — honest empty/error, not fake meters.
-5. The popover lists one card per account. Click a card to select the active account for the menu-bar % (most-constrained window). Refresh loads every OpenCode account concurrently and keeps the last-good snapshot on failure. `OPENCODE_GO_API_KEY` or `OPENCODE_API_KEY` is an implicit single-account fallback when no accounts have been added yet. Settings then shows that env source (label like `OpenCode (env)`, live quota status, read-only variable name) instead of an empty “No OpenCode accounts” state. **Import** copies the env key into a Keychain account; QuotaBar does not auto-migrate.
-
-## Preview fixtures
-
-Settings → **Preview fixtures** loads bundled sample JSON (`cursor.json`, `chatgpt.json`, `glm.json`, `grok.json`, `opencodeGo.json`) so you can screenshot the UI without accounts. Off by default, labeled “Preview” in the popover.
-
-## Why it is not sandboxed
-
-Reading Cursor’s local `state.vscdb` and accepting pasted browser cookies requires ordinary user-file and network access. A sandboxed menu extra would need a grab-bag of temporary-exception entitlements (or would simply fail). QuotaBar ships as a **non-sandboxed** `LSUIElement` utility — the usual model for this class of app. It does not request iCloud, push, or any other Apple capability.
+**OpenCode Go** — Paste a Go API key per account. With no saved accounts, `OPENCODE_GO_API_KEY` or `OPENCODE_API_KEY` is used until you Import it in Settings.
 
 ## Disclaimer
 
-Unofficial usage endpoints, cookies, and local token files belong to their vendors and can change without notice. QuotaBar is not affiliated with Cursor, OpenAI, z.ai, BigModel, xAI, or OpenCode. Use your own credentials; rotate them if you ever paste a session into a chat or screenshot.
+QuotaBar is an independent, unofficial client. It calls the same usage endpoints those products’ dashboards already use; those endpoints can change or break without notice. Not affiliated with Cursor, OpenAI, z.ai, BigModel, xAI, or OpenCode.
 
 ## License
 
