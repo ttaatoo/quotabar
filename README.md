@@ -4,6 +4,18 @@ A menu-bar-only macOS 14+ utility (version **0.0.16**) that shows remaining **Cu
 
 QuotaBar is an independent implementation. It talks to the same unofficial usage endpoints those products’ own dashboards already call. Those endpoints can change or break without notice.
 
+## Screenshots
+
+From a recent build. Account emails in these shots are mocked.
+
+**All providers at a glance**
+
+![All providers at a glance](docs/screenshots/popover-all-mock.png)
+
+**Settings · ChatGPT accounts**
+
+![Settings · ChatGPT accounts](docs/screenshots/settings-mock.png)
+
 ## Install
 
 Ad-hoc signed (no Apple Developer ID). On your Mac:
