@@ -97,7 +97,14 @@ private struct OverallAccountRowView: View {
     }
 
     private var secondaryText: String {
-        row.card.compactStatus(treatIdleAsUpdating: treatIdleAsUpdating) ?? row.hint
+        if let status = row.card.compactStatus(treatIdleAsUpdating: treatIdleAsUpdating) {
+            return status
+        }
+        if let window = primaryWindow,
+           row.hint.range(of: window.title, options: .caseInsensitive) == nil {
+            return "\(row.hint) · \(window.title)"
+        }
+        return row.hint
     }
 
     @ViewBuilder
