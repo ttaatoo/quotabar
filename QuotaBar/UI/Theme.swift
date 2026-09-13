@@ -39,6 +39,12 @@ enum Theme {
     static let accountCardSpacing: CGFloat = 4
     static let accountCardListSpacing: CGFloat = 6
     static let accountCardRadius: CGFloat = 9
+    static let overallSectionSpacing: CGFloat = 10
+    static let overallRowListSpacing: CGFloat = 4
+    static let overallRowPadding: CGFloat = 7
+    static let overallRowRadius: CGFloat = 8
+    static let overallMeterWidth: CGFloat = 92
+    static let overallMeterBarHeight: CGFloat = 3
     static let resetChipHeight: CGFloat = 16
     static let footerStackSpacing: CGFloat = 6
     static let footerButtonsHeight: CGFloat = 18

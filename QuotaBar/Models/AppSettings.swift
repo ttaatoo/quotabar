@@ -164,7 +164,10 @@ struct GrokAccount: Equatable, Codable, Identifiable, Hashable {
 
 struct AppSettings: Equatable, Codable {
     var enabledProviders: [ProviderKind]
+    /// Last real provider for the menu bar and Settings first-open. Never `.all`.
     var selectedProvider: ProviderKind
+    /// Popover landing tab. Missing config key decodes as All.
+    var popoverTab: PopoverTab
     var pollIntervalSeconds: Int
     var displayMode: DisplayMode
     var glmRegion: GLMRegion
@@ -187,6 +190,7 @@ struct AppSettings: Equatable, Codable {
     static let `default` = AppSettings(
         enabledProviders: ProviderKind.allCases,
         selectedProvider: .cursor,
+        popoverTab: .all,
         pollIntervalSeconds: 120,
         displayMode: .remaining,
         glmRegion: .global,
@@ -242,6 +246,9 @@ struct AppSettings: Equatable, Codable {
         }
         if !enabledProviders.contains(selectedProvider) {
             selectedProvider = enabledProviders.first ?? .cursor
+        }
+        if case .provider(let tab) = popoverTab, !enabledProviders.contains(tab) {
+            popoverTab = .all
         }
 
         var seen = Set<UUID>()

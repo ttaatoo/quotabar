@@ -9,10 +9,10 @@ struct PopoverView: View {
         VStack(alignment: .leading, spacing: Theme.popoverStackSpacing) {
             header
             ProviderSwitcher(
-                providers: store.visibleProviders,
+                tabs: store.popoverTabs,
                 selected: Binding(
-                    get: { store.selected },
-                    set: { store.select($0) }
+                    get: { store.popoverTab },
+                    set: { store.selectTab($0) }
                 )
             )
             cards
@@ -31,12 +31,8 @@ struct PopoverView: View {
         HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    ProviderMark(
-                        provider: store.selected,
-                        size: 14,
-                        tint: Theme.settingsTint(for: store.selected)
-                    )
-                    Text(store.selected.title)
+                    headerMark
+                    Text(store.popoverTab.title)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Theme.primary)
                     if store.settings.previewFixtures {
@@ -67,37 +63,37 @@ struct PopoverView: View {
         .frame(minHeight: Theme.headerMinHeight, alignment: .top)
     }
 
+    @ViewBuilder
+    private var headerMark: some View {
+        if store.popoverTab == .all {
+            OverallMark(size: 14)
+        } else {
+            ProviderMark(
+                provider: store.selected,
+                size: 14,
+                tint: Theme.settingsTint(for: store.selected)
+            )
+        }
+    }
+
     /// Same tree for 0 / 1 / N cards. A ScrollView → hugging stack is always
     /// present so tab switches cannot change NSHostingView.fittingSize.
     /// Cards hug their content; leftover space is the popover background.
     private var cards: some View {
-        let rows = cardRows
-        return ScrollView(.vertical, showsIndicators: rows.count > 2) {
-            VStack(spacing: Theme.accountCardListSpacing) {
-                ForEach(rows) { row in
-                    AccountCard(
-                        row: row,
-                        provider: store.selected,
-                        mode: store.settings.displayMode,
-                        now: store.now,
-                        onRetry: { Task { await store.refreshCard(row.id) } },
-                        onOpenSettings: store.openSettings,
-                        isActive: store.isActiveAccountCard(row.id),
-                        onActivate: (store.selected == .chatgpt || store.selected == .opencodeGo || store.selected == .grok)
-                            ? { store.activateAccountCard(row.id) }
-                            : nil,
-                        reduceMotion: reduceMotion,
-                        treatIdleAsUpdating: store.isRefreshing
-                    )
+        let showsFade = shouldShowScrollFade
+        return ScrollView(.vertical, showsIndicators: showsFade) {
+            Group {
+                if store.popoverTab == .all {
+                    OverallListView(store: store, reduceMotion: reduceMotion)
+                } else {
+                    providerCards
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .top)
-            .padding(.bottom, 2)
         }
         .scrollBounceBehavior(.basedOnSize)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .overlay(alignment: .bottom) {
-            if rows.count > 2 {
+            if showsFade {
                 LinearGradient(
                     colors: [Theme.background.opacity(0), Theme.background],
                     startPoint: .top,
@@ -110,20 +106,38 @@ struct PopoverView: View {
         .clipped()
     }
 
-    private var cardRows: [AccountCardRow] {
-        let rows = store.accountCards
-        if rows.isEmpty {
-            return [
-                AccountCardRow(
-                    id: store.selected.rawValue,
-                    email: nil,
-                    fallbackTitle: "Not signed in",
-                    state: store.selectedState,
-                    hasCredentials: false
+    private var providerCards: some View {
+        VStack(spacing: Theme.accountCardListSpacing) {
+            ForEach(cardRows) { row in
+                AccountCard(
+                    row: row,
+                    provider: store.selected,
+                    mode: store.settings.displayMode,
+                    now: store.now,
+                    onRetry: { Task { await store.refreshCard(row.id) } },
+                    onOpenSettings: store.openSettings,
+                    isActive: store.isActiveAccountCard(row.id),
+                    onActivate: (store.selected == .chatgpt || store.selected == .opencodeGo || store.selected == .grok)
+                        ? { store.activateAccountCard(row.id) }
+                        : nil,
+                    reduceMotion: reduceMotion,
+                    treatIdleAsUpdating: store.isRefreshing
                 )
-            ]
+            }
         }
-        return rows
+        .frame(maxWidth: .infinity, alignment: .top)
+        .padding(.bottom, 2)
+    }
+
+    private var cardRows: [AccountCardRow] {
+        store.displayableAccountCards(for: store.selected)
+    }
+
+    private var shouldShowScrollFade: Bool {
+        if store.popoverTab == .all {
+            return store.overallSections.reduce(0) { $0 + $1.rows.count } > 3
+        }
+        return cardRows.count > 2
     }
 
     private var footer: some View {
@@ -140,14 +154,27 @@ struct PopoverView: View {
 
     private var isLoading: Bool {
         if store.isRefreshing { return true }
-        return store.accountCards.contains { row in
+        if store.popoverTab == .all {
+            return store.overallSections.contains { section in
+                section.rows.contains { row in
+                    if case .loading = row.card.state { return true }
+                    return false
+                }
+            }
+        }
+        return cardRows.contains { row in
             if case .loading = row.state { return true }
             return false
         }
     }
 
     private var subtitle: String {
-        let rows = store.accountCards
+        let rows: [AccountCardRow]
+        if store.popoverTab == .all {
+            rows = store.overallSections.flatMap { $0.rows.map(\.card) }
+        } else {
+            rows = store.accountCards
+        }
         let ready = rows.compactMap { row -> UsageSnapshot? in
             if case .ready(let snapshot) = row.state { return snapshot }
             return nil
@@ -155,6 +182,14 @@ struct PopoverView: View {
         let updated: String
         if let newest = ready.max(by: { $0.fetchedAt < $1.fetchedAt }) {
             updated = updatedText(from: newest)
+        } else if store.popoverTab == .all {
+            if store.isRefreshing || rows.contains(where: { if case .loading = $0.state { return true }; return false }) {
+                updated = "Updating…"
+            } else if rows.contains(where: { if case .failure = $0.state { return true }; return false }) {
+                updated = "Update failed"
+            } else {
+                updated = "Not signed in"
+            }
         } else {
             switch store.selectedState {
             case .ready(let snapshot):
@@ -168,6 +203,9 @@ struct PopoverView: View {
             case .failure:
                 updated = "Update failed"
             }
+        }
+        if store.popoverTab == .all, rows.count > 1 {
+            return "\(rows.count) accounts · \(updated)"
         }
         if (store.selected == .chatgpt || store.selected == .opencodeGo || store.selected == .grok), rows.count > 1 {
             return "\(rows.count) accounts · \(updated)"
@@ -391,19 +429,7 @@ struct AccountCard: View {
     }
 
     private var title: String {
-        if let email = row.email, !email.isEmpty {
-            return email
-        }
-        if case .ready(let snapshot) = row.state, let email = snapshot.accountEmail, !email.isEmpty {
-            return email
-        }
-        if case .signedOut(let message) = row.state, !hasKnownEmail, !row.hasCredentials {
-            return cursorSignedOutTitle(message)
-        }
-        if case .failure = row.state {
-            return row.fallbackTitle
-        }
-        return row.fallbackTitle
+        row.displayTitle(for: provider)
     }
 
     private var planName: String? {
@@ -414,8 +440,7 @@ struct AccountCard: View {
     }
 
     private var hasKnownEmail: Bool {
-        if let email = row.email, !email.isEmpty { return true }
-        return false
+        row.hasKnownEmail
     }
 
     private func shortFailure(_ message: String) -> String {
@@ -425,10 +450,7 @@ struct AccountCard: View {
     }
 
     private func cursorSignedOutTitle(_ message: String) -> String {
-        if provider == .cursor, CursorAuth.isRejectedSessionMessage(message) {
-            return "Session rejected"
-        }
-        return "Not signed in"
+        AccountCardRow.signedOutTitle(provider: provider, message: message)
     }
 }
 

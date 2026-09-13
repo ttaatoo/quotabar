@@ -66,6 +66,27 @@ struct UsageSnapshot: Equatable, Sendable {
         return values.min()
     }
 
+    /// Overall-list primary window: lowest % left (tightest remaining).
+    /// Unlimited windows are ignored unless every window is unlimited.
+    /// Ties break toward the sooner reset.
+    var tightestWindow: UsageWindow? {
+        let constrained = windows.filter { !$0.unlimited }
+        let pool = constrained.isEmpty ? windows : constrained
+        return pool.min { lhs, rhs in
+            if lhs.remainingPercent != rhs.remainingPercent {
+                return lhs.remainingPercent < rhs.remainingPercent
+            }
+            switch (lhs.resetAt, rhs.resetAt) {
+            case let (left?, right?):
+                return left < right
+            case (_?, nil):
+                return true
+            default:
+                return false
+            }
+        }
+    }
+
     var isLow: Bool {
         guard let remaining = mostConstrainedRemaining else { return false }
         return remaining < 25
