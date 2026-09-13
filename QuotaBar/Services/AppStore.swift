@@ -37,21 +37,31 @@ final class AppStore: ObservableObject {
 
     var selected: ProviderKind { settings.selectedProvider }
 
+    var popoverTab: PopoverTab { settings.popoverTab }
+
+    var popoverTabs: [PopoverTab] {
+        [.all] + visibleProviders.map { .provider($0) }
+    }
+
     var visibleChatGPTAccounts: [ChatGPTAccount] {
         settings.visibleChatGPTAccounts
     }
 
     var selectedState: ProviderLoadState {
-        if selected == .chatgpt {
+        providerState(selected)
+    }
+
+    func providerState(_ provider: ProviderKind) -> ProviderLoadState {
+        switch provider {
+        case .chatgpt:
             return activeChatGPTState
-        }
-        if selected == .opencodeGo {
+        case .opencodeGo:
             return activeOpenCodeGoState
-        }
-        if selected == .grok {
+        case .grok:
             return activeGrokState
+        case .cursor, .glm:
+            return states[provider] ?? .idle
         }
-        return states[selected] ?? .idle
     }
 
     /// Card in the ChatGPT tab that is active for the menu bar.
@@ -117,7 +127,14 @@ final class AppStore: ObservableObject {
 
     /// One card per ChatGPT / OpenCode / Grok account; Cursor / GLM are a single card each.
     var accountCards: [AccountCardRow] {
-        if selected == .chatgpt {
+        accountCards(for: selected)
+    }
+
+    /// Same rows the single-provider tab already shows. Overall reuses this —
+    /// it does not fetch or cache a second copy of usage state.
+    func accountCards(for provider: ProviderKind) -> [AccountCardRow] {
+        switch provider {
+        case .chatgpt:
             return chatgptDisplayRows.map { row in
                 let credentials: Bool
                 if let account = row.account {
@@ -133,8 +150,7 @@ final class AppStore: ObservableObject {
                     hasCredentials: credentials
                 )
             }
-        }
-        if selected == .opencodeGo {
+        case .opencodeGo:
             return opencodeGoDisplayRows.map { row in
                 let credentials: Bool
                 if let account = row.account {
@@ -150,8 +166,7 @@ final class AppStore: ObservableObject {
                     hasCredentials: credentials
                 )
             }
-        }
-        if selected == .grok {
+        case .grok:
             return grokDisplayRows.map { row in
                 let credentials: Bool
                 if let account = row.account {
@@ -170,31 +185,106 @@ final class AppStore: ObservableObject {
                     hasCredentials: credentials
                 )
             }
-        }
-        let state = states[selected] ?? .idle
-        let email = state.snapshot?.accountEmail
-        let fallback: String
-        switch state {
-        case .signedOut:
-            fallback = "Not signed in"
-        case .ready(let snapshot):
-            if selected == .glm {
-                fallback = snapshot.accountEmail ?? snapshot.planName.map { "GLM \($0)" } ?? "GLM"
-            } else {
-                fallback = snapshot.accountEmail ?? "Email unknown"
+        case .cursor, .glm:
+            let state = states[provider] ?? .idle
+            let email = state.snapshot?.accountEmail
+            let fallback: String
+            switch state {
+            case .signedOut:
+                fallback = "Not signed in"
+            case .ready(let snapshot):
+                if provider == .glm {
+                    fallback = snapshot.accountEmail ?? snapshot.planName.map { "GLM \($0)" } ?? "GLM"
+                } else {
+                    fallback = snapshot.accountEmail ?? "Email unknown"
+                }
+            default:
+                fallback = provider.title
             }
-        default:
-            fallback = selected.title
+            return [
+                AccountCardRow(
+                    id: provider.rawValue,
+                    email: email,
+                    fallbackTitle: fallback,
+                    state: state,
+                    hasCredentials: !state.isSignedOut
+                )
+            ]
         }
-        return [
-            AccountCardRow(
-                id: selected.rawValue,
-                email: email,
-                fallbackTitle: fallback,
-                state: state,
-                hasCredentials: !state.isSignedOut
+    }
+
+    /// Always at least one row so Overall can show signed-out providers
+    /// (Settings discovery) instead of omitting the section.
+    func displayableAccountCards(for provider: ProviderKind) -> [AccountCardRow] {
+        let rows = accountCards(for: provider)
+        if rows.isEmpty {
+            return [
+                AccountCardRow(
+                    id: provider.rawValue,
+                    email: nil,
+                    fallbackTitle: "Not signed in",
+                    state: providerState(provider),
+                    hasCredentials: false
+                )
+            ]
+        }
+        return rows
+    }
+
+    var overallSections: [OverallSection] {
+        visibleProviders.map { provider in
+            OverallSection(
+                provider: provider,
+                rows: displayableAccountCards(for: provider).map { card in
+                    OverallAccountRow(
+                        provider: provider,
+                        card: card,
+                        hint: overallHint(provider: provider, card: card)
+                    )
+                }
             )
-        ]
+        }
+    }
+
+    func openOverallRow(_ row: OverallAccountRow) {
+        selectTab(.provider(row.provider))
+        activateAccountCard(row.card.id)
+    }
+
+    private func overallHint(provider: ProviderKind, card: AccountCardRow) -> String {
+        if case .ready(let snapshot) = card.state, let plan = snapshot.planName, !plan.isEmpty {
+            return plan
+        }
+        if let label = overallAccountLabel(provider: provider, cardID: card.id),
+           label != card.displayTitle(for: provider) {
+            return label
+        }
+        if provider == .opencodeGo, card.id == Self.implicitOpenCodeGoID.uuidString {
+            return ambientOpenCodeGoSubtitle
+        }
+        if case .signedOut(let message) = card.state {
+            if provider == .cursor, CursorAuth.isRejectedSessionMessage(message) {
+                return "Re-sign in inside Cursor"
+            }
+            if !card.hasCredentials {
+                return "Add in Settings"
+            }
+        }
+        return provider.title
+    }
+
+    private func overallAccountLabel(provider: ProviderKind, cardID: String) -> String? {
+        guard let id = UUID(uuidString: cardID) else { return nil }
+        switch provider {
+        case .chatgpt:
+            return settings.chatgptAccounts.first(where: { $0.id == id })?.label
+        case .opencodeGo:
+            return settings.opencodeGoAccounts.first(where: { $0.id == id })?.label
+        case .grok:
+            return settings.grokAccounts.first(where: { $0.id == id })?.label
+        case .cursor, .glm:
+            return nil
+        }
     }
 
     var hasAmbientCodexAccount: Bool {
@@ -346,8 +436,15 @@ final class AppStore: ObservableObject {
     }
 
     func select(_ provider: ProviderKind) {
-        guard settings.enabledProviders.contains(provider) else { return }
-        settings.selectedProvider = provider
+        selectTab(.provider(provider))
+    }
+
+    func selectTab(_ tab: PopoverTab) {
+        if case .provider(let provider) = tab {
+            guard settings.enabledProviders.contains(provider) else { return }
+            settings.selectedProvider = provider
+        }
+        settings.popoverTab = tab
         persistSettings()
     }
 
@@ -371,6 +468,9 @@ final class AppStore: ObservableObject {
             }
             if settings.selectedProvider == provider {
                 settings.selectedProvider = settings.enabledProviders[0]
+            }
+            if case .provider(let tab) = settings.popoverTab, tab == provider {
+                settings.popoverTab = .all
             }
         }
         persistSettings()
@@ -607,19 +707,12 @@ final class AppStore: ObservableObject {
         }
         // Let SwiftUI paint the spinner before a fast fetch coalesces state updates.
         await Task.yield()
-        if selected == .chatgpt {
-            await refreshAllChatGPTAccounts(userInitiated: true)
-            return
+        switch settings.popoverTab {
+        case .all:
+            await refreshVisibleProviders()
+        case .provider(let provider):
+            await refreshProviderAccounts(provider, userInitiated: true)
         }
-        if selected == .opencodeGo {
-            await refreshAllOpenCodeGoAccounts(userInitiated: true)
-            return
-        }
-        if selected == .grok {
-            await refreshAllGrokAccounts(userInitiated: true)
-            return
-        }
-        await refresh(selected)
     }
 
     func refreshCard(_ cardID: String) async {
@@ -644,6 +737,12 @@ final class AppStore: ObservableObject {
     func refreshAll() async {
         isRefreshing = true
         defer { isRefreshing = false }
+        await refreshVisibleProviders()
+    }
+
+    /// Shared fan-out used by poll, All-tab refresh, and `refreshAll`.
+    /// Does not invent a second pipeline — same `refresh(_:)` jobs as before.
+    private func refreshVisibleProviders() async {
         let providers = visibleProviders
         // Paint every card as in-flight before any provider hops off MainActor.
         // Otherwise ChatGPT `.loading` + later `.idle` both read as "Updating…".
@@ -653,6 +752,19 @@ final class AppStore: ObservableObject {
         // Fan-out off MainActor so ChatGPT / Go cannot stall Cursor / GLM / Grok.
         await RefreshWork.mapConcurrent(providers) { provider in
             await AppStore.shared.refresh(provider)
+        }
+    }
+
+    private func refreshProviderAccounts(_ provider: ProviderKind, userInitiated: Bool) async {
+        switch provider {
+        case .chatgpt:
+            await refreshAllChatGPTAccounts(userInitiated: userInitiated)
+        case .opencodeGo:
+            await refreshAllOpenCodeGoAccounts(userInitiated: userInitiated)
+        case .grok:
+            await refreshAllGrokAccounts(userInitiated: userInitiated)
+        case .cursor, .glm:
+            await refresh(provider)
         }
     }
 
@@ -1811,4 +1923,64 @@ struct AccountCardRow: Identifiable, Equatable {
     var fallbackTitle: String
     var state: ProviderLoadState
     var hasCredentials: Bool = false
+
+    var hasKnownEmail: Bool {
+        if let email, !email.isEmpty { return true }
+        return false
+    }
+
+    func displayTitle(for provider: ProviderKind) -> String {
+        if let email, !email.isEmpty {
+            return email
+        }
+        if case .ready(let snapshot) = state, let email = snapshot.accountEmail, !email.isEmpty {
+            return email
+        }
+        if case .signedOut(let message) = state, !hasKnownEmail, !hasCredentials {
+            return Self.signedOutTitle(provider: provider, message: message)
+        }
+        return fallbackTitle
+    }
+
+    static func signedOutTitle(provider: ProviderKind, message: String) -> String {
+        if provider == .cursor, CursorAuth.isRejectedSessionMessage(message) {
+            return "Session rejected"
+        }
+        return "Not signed in"
+    }
+
+    func compactStatus(treatIdleAsUpdating: Bool) -> String? {
+        switch state {
+        case .ready(let snapshot):
+            return snapshot.windows.isEmpty ? "No usage windows" : nil
+        case .loading:
+            return "Updating…"
+        case .idle:
+            return treatIdleAsUpdating ? "Updating…" : "Waiting…"
+        case .signedOut:
+            if hasCredentials || hasKnownEmail {
+                return "Couldn’t refresh"
+            }
+            return nil
+        case .failure(let message):
+            let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.count <= 80 { return trimmed }
+            return String(trimmed.prefix(77)) + "…"
+        }
+    }
+}
+
+struct OverallSection: Identifiable, Equatable {
+    var provider: ProviderKind
+    var rows: [OverallAccountRow]
+
+    var id: ProviderKind { provider }
+}
+
+struct OverallAccountRow: Identifiable, Equatable {
+    var provider: ProviderKind
+    var card: AccountCardRow
+    var hint: String
+
+    var id: String { "\(provider.rawValue):\(card.id)" }
 }

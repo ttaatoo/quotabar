@@ -19,7 +19,7 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable, Hashable, Sendab
         }
     }
 
-    /// Compact pill label. Five providers must still fit the frozen popover row.
+    /// Compact pill label. All + five providers; the switcher scrolls if needed.
     var shortTitle: String {
         switch self {
         case .opencodeGo: return "Go"

@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct ProviderSwitcher: View {
-    let providers: [ProviderKind]
-    @Binding var selected: ProviderKind
+    let tabs: [PopoverTab]
+    @Binding var selected: PopoverTab
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
@@ -15,13 +15,13 @@ struct ProviderSwitcher: View {
 
     private var equalWidthRow: some View {
         HStack(spacing: 3) {
-            ForEach(providers) { provider in
+            ForEach(tabs) { tab in
                 ProviderSwitcherChip(
-                    title: provider.shortTitle,
-                    isSelected: selected == provider,
+                    title: tab.shortTitle,
+                    isSelected: selected == tab,
                     fillsWidth: true
                 ) {
-                    selected = provider
+                    selected = tab
                 }
             }
         }
@@ -30,13 +30,13 @@ struct ProviderSwitcher: View {
     private var scrollableRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 3) {
-                ForEach(providers) { provider in
+                ForEach(tabs) { tab in
                     ProviderSwitcherChip(
-                        title: provider.shortTitle,
-                        isSelected: selected == provider,
+                        title: tab.shortTitle,
+                        isSelected: selected == tab,
                         fillsWidth: false
                     ) {
-                        selected = provider
+                        selected = tab
                     }
                 }
             }

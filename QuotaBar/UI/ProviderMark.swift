@@ -1,6 +1,29 @@
 import AppKit
 import SwiftUI
 
+/// Same three bars as the menu-bar pill. Used for the All / Overall tab.
+struct OverallMark: View {
+    var size: CGFloat = 14
+
+    var body: some View {
+        let barWidth = size / 4.6
+        let spacing = (size - barWidth * 3) / 2
+        HStack(alignment: .bottom, spacing: spacing) {
+            bar(heightFraction: 0.42, width: barWidth, color: Theme.logoBlue)
+            bar(heightFraction: 0.68, width: barWidth, color: Theme.logoPurple)
+            bar(heightFraction: 1.0, width: barWidth, color: Theme.logoGreen)
+        }
+        .frame(width: size, height: size, alignment: .bottom)
+        .accessibilityHidden(true)
+    }
+
+    private func bar(heightFraction: CGFloat, width: CGFloat, color: Color) -> some View {
+        RoundedRectangle(cornerRadius: 1.1, style: .continuous)
+            .fill(color)
+            .frame(width: width, height: size * heightFraction)
+    }
+}
+
 /// Bundled official brand mark. Falls back to the SF Symbol if the asset is missing.
 /// Marks render in original colors (light-on-dark kit variants). Tint applies only to the fallback.
 struct ProviderMark: View {

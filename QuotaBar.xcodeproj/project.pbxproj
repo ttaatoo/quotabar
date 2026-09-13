@@ -12,6 +12,8 @@
 		000000000000000000000006 /* ProviderKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000005 /* ProviderKind.swift */; };
 		000000000000000000000008 /* UsageModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000007 /* UsageModels.swift */; };
 		00000000000000000000000A /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000009 /* AppSettings.swift */; };
+		000000000000000000000131 /* PopoverTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000130 /* PopoverTab.swift */; };
+		000000000000000000000133 /* OverallListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000132 /* OverallListView.swift */; };
 		00000000000000000000000C /* QuotaError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000000B /* QuotaError.swift */; };
 		00000000000000000000000E /* TimeFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000000D /* TimeFormatting.swift */; };
 		000000000000000000000010 /* JSONSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000000F /* JSONSupport.swift */; };
@@ -61,6 +63,8 @@
 		000000000000000000000005 /* ProviderKind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderKind.swift; sourceTree = "<group>"; };
 		000000000000000000000007 /* UsageModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageModels.swift; sourceTree = "<group>"; };
 		000000000000000000000009 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
+		000000000000000000000130 /* PopoverTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverTab.swift; sourceTree = "<group>"; };
+		000000000000000000000132 /* OverallListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverallListView.swift; sourceTree = "<group>"; };
 		00000000000000000000000B /* QuotaError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaError.swift; sourceTree = "<group>"; };
 		00000000000000000000000D /* TimeFormatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeFormatting.swift; sourceTree = "<group>"; };
 		00000000000000000000000F /* JSONSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONSupport.swift; sourceTree = "<group>"; };
@@ -151,6 +155,7 @@
 				000000000000000000000005 /* ProviderKind.swift */,
 				000000000000000000000007 /* UsageModels.swift */,
 				000000000000000000000009 /* AppSettings.swift */,
+				000000000000000000000130 /* PopoverTab.swift */,
 				00000000000000000000000B /* QuotaError.swift */,
 			);
 			path = Models;
@@ -197,6 +202,7 @@
 				000000000000000000000029 /* ProviderSwitcher.swift */,
 				00000000000000000000002B /* EmptyStateView.swift */,
 				00000000000000000000002D /* PopoverView.swift */,
+				000000000000000000000132 /* OverallListView.swift */,
 				0000000000000000000000A0 /* FrozenPopoverHosting.swift */,
 				00000000000000000000002F /* SettingsView.swift */,
 				0000000000000000000000D0 /* SettingsChrome.swift */,
@@ -318,6 +324,8 @@
 				000000000000000000000006 /* ProviderKind.swift in Sources */,
 				000000000000000000000008 /* UsageModels.swift in Sources */,
 				00000000000000000000000A /* AppSettings.swift in Sources */,
+				000000000000000000000131 /* PopoverTab.swift in Sources */,
+				000000000000000000000133 /* OverallListView.swift in Sources */,
 				00000000000000000000000C /* QuotaError.swift in Sources */,
 				00000000000000000000000E /* TimeFormatting.swift in Sources */,
 				000000000000000000000010 /* JSONSupport.swift in Sources */,

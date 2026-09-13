@@ -194,6 +194,7 @@ enum ConfigStore {
 private struct ConfigFile: Codable {
     var enabledProviders: [ProviderKind]?
     var selectedProvider: ProviderKind?
+    var popoverTab: PopoverTab?
     var pollIntervalSeconds: Int?
     var displayMode: DisplayMode?
     var glmRegion: GLMRegion?
@@ -216,6 +217,7 @@ private struct ConfigFile: Codable {
     init(settings: AppSettings) {
         enabledProviders = settings.enabledProviders
         selectedProvider = settings.selectedProvider
+        popoverTab = settings.popoverTab
         pollIntervalSeconds = settings.pollIntervalSeconds
         displayMode = settings.displayMode
         glmRegion = settings.glmRegion
@@ -238,6 +240,8 @@ private struct ConfigFile: Codable {
         var value = AppSettings.default
         if let enabledProviders { value.enabledProviders = enabledProviders }
         if let selectedProvider { value.selectedProvider = selectedProvider }
+        // Missing key = pre-Overall config. Land on All so the first screen is discoverable.
+        if let popoverTab { value.popoverTab = popoverTab }
         if let pollIntervalSeconds { value.pollIntervalSeconds = pollIntervalSeconds }
         if let displayMode { value.displayMode = displayMode }
         if let glmRegion { value.glmRegion = glmRegion }
