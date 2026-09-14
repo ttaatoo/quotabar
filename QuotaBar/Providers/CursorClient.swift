@@ -2,7 +2,29 @@ import Foundation
 
 enum CursorClient {
     static func fetch(cookie pasted: String?, now: Date = Date()) async throws -> UsageSnapshot {
-        let cookie = try CursorAuth.resolveCookie(pasted: pasted)
+        let session = try CursorAuth.resolveSession(pasted: pasted)
+        do {
+            return try await fetchUsage(cookie: session.cookie, now: now)
+        } catch {
+            guard session.allowsRefresh, isRecoverableAuthFailure(error) else {
+                throw error
+            }
+            let cookie = try await CursorAuth.refreshAmbientSession()
+            return try await fetchUsage(cookie: cookie, now: now)
+        }
+    }
+
+    private static func isRecoverableAuthFailure(_ error: Error) -> Bool {
+        guard let quota = error as? QuotaError else { return false }
+        switch quota {
+        case .unauthorized:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func fetchUsage(cookie: String, now: Date) async throws -> UsageSnapshot {
         let headers = [
             "Cookie": cookie,
             "Origin": "https://cursor.com",
@@ -17,6 +39,9 @@ enum CursorClient {
         try HTTPClient.requireOK(response, data: data, host: "cursor.com")
 
         let object = try JSONWalk.object(from: data)
+        if object["error"] as? String == "not_authenticated" {
+            throw QuotaError.unauthorized(CursorAuth.unauthenticatedMessage)
+        }
         let email = await resolveEmail(cookie: cookie, usageObject: object)
         return try parse(object, fetchedAt: now, email: email)
     }
