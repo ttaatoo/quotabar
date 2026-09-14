@@ -29,10 +29,12 @@ enum CursorAuth {
 
     static func isRejectedSessionMessage(_ message: String) -> Bool {
         let lower = message.lowercased()
+        if lower.contains("security checkpoint") { return false }
         return lower.contains("rejected")
-            || message.contains("403")
-            || message.contains("401")
             || lower.contains("not authenticated")
+            || lower.contains("refresh failed")
+            || lower.contains("no refresh token")
+            || message.contains("401")
     }
 
     static let defaultDBPath = FileManager.default.homeDirectoryForCurrentUser
@@ -55,6 +57,8 @@ enum CursorAuth {
     struct ResolvedSession: Equatable, Sendable {
         var cookie: String
         var kind: SessionKind
+        /// Raw JWT for `api2.cursor.sh` Bearer calls. Never the cookie header.
+        var accessToken: String?
 
         var allowsRefresh: Bool { kind == .ambient }
     }
@@ -72,12 +76,60 @@ enum CursorAuth {
     /// Pasted Advanced cookie wins and is never replaced by an ambient refresh.
     static func resolveSession(pasted: String?) throws -> ResolvedSession {
         if let pasted, let cookie = normalizePastedCookie(pasted) {
-            return ResolvedSession(cookie: cookie, kind: .pasted)
+            return ResolvedSession(
+                cookie: cookie,
+                kind: .pasted,
+                accessToken: bearerAccessToken(fromCookie: cookie)
+            )
         }
         if let token = resolveAmbientAccessToken() {
-            return ResolvedSession(cookie: cookie(fromAccessToken: token), kind: .ambient)
+            let bearer = bearerAccessToken(fromStored: token) ?? token
+            return ResolvedSession(
+                cookie: cookie(fromAccessToken: token),
+                kind: .ambient,
+                accessToken: bearer
+            )
         }
         throw QuotaError.notSignedIn(notSignedInMessage)
+    }
+
+    static func session(fromAccessToken token: String, kind: SessionKind) -> ResolvedSession {
+        let bearer = bearerAccessToken(fromStored: token) ?? token
+        return ResolvedSession(
+            cookie: cookie(fromAccessToken: token),
+            kind: kind,
+            accessToken: bearer
+        )
+    }
+
+    /// JWT used as `Authorization: Bearer` — not `WorkosCursorSessionToken=…`.
+    static func bearerAccessToken(fromStored raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if trimmed.contains("WorkosCursorSessionToken=")
+            || trimmed.contains("%3A%3A")
+            || trimmed.contains("::") {
+            return bearerAccessToken(fromCookie: cookie(fromAccessToken: trimmed))
+        }
+        return trimmed
+    }
+
+    static func bearerAccessToken(fromCookie cookie: String) -> String? {
+        for component in cookie.split(separator: ";") {
+            let pair = component.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            guard pair.count == 2 else { continue }
+            let name = pair[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard name == "WorkosCursorSessionToken" else { continue }
+            let encoded = pair[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = encoded.removingPercentEncoding ?? encoded
+            let token = value.components(separatedBy: "::").last ?? value
+            let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        if JWT.payload(cookie) != nil {
+            return cookie.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
     }
 
     static func cookie(fromAccessToken token: String) -> String {
@@ -167,7 +219,8 @@ enum CursorAuth {
     /// Exchange `cursorAuth/refreshToken` at Cursor's desktop token endpoint.
     /// Persists the new access token in memory + QuotaBar Keychain only —
     /// never writes `state.vscdb` or `~/.cursor`.
-    static func refreshAmbientSession() async throws -> String {
+    /// Returns the new access JWT (not a cookie).
+    static func refreshAmbientAccessToken() async throws -> String {
         try await CursorRefreshGate.shared.run {
             try await performRefresh()
         }
@@ -201,12 +254,13 @@ enum CursorAuth {
                 return tokens
             }
         }
-        return LocalTokens(accessToken: nil, refreshToken: nil)
+        return LocalTokens(accessToken: nil, refreshToken: nil, cachedEmail: nil)
     }
 
     struct LocalTokens: Equatable, Sendable {
         var accessToken: String?
         var refreshToken: String?
+        var cachedEmail: String?
     }
 
     /// Copies the live Cursor DB (and WAL/SHM) then reads auth keys read-only.
@@ -231,11 +285,22 @@ enum CursorAuth {
             ],
             timeout: RefreshWork.oauthTimeout
         )
-        if response.statusCode == 401 || response.statusCode == 403 {
+        let kind = CursorHTTP.classify(
+            status: response.statusCode,
+            data: data,
+            contentType: response.value(forHTTPHeaderField: "Content-Type")
+        )
+        switch kind {
+        case .checkpoint:
+            throw QuotaError.network(CursorHTTP.checkpointMessage)
+        case .unauthorized:
             SessionCache.clear()
             throw QuotaError.unauthorized(refreshFailedMessage)
+        case .failure:
+            try HTTPClient.requireOK(response, data: data, host: url.host ?? "api2.cursor.sh")
+        case .ok:
+            break
         }
-        try HTTPClient.requireOK(response, data: data, host: url.host ?? "api2.cursor.sh")
 
         let object = try JSONWalk.object(from: data)
         let parsed = parseRefreshResponse(object)
@@ -250,7 +315,7 @@ enum CursorAuth {
             sourceAccessToken: local.accessToken ?? cached?.sourceAccessToken
         )
         SessionCache.save(session)
-        return cookie(fromAccessToken: parsed.accessToken)
+        return parsed.accessToken
     }
 
     private static func refreshTokenForRefresh(local: LocalTokens, cached: CachedSession?) -> String? {
@@ -276,13 +341,15 @@ enum CursorAuth {
         guard let data = try? Data(contentsOf: url),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
-            return LocalTokens(accessToken: nil, refreshToken: nil)
+            return LocalTokens(accessToken: nil, refreshToken: nil, cachedEmail: nil)
         }
         return LocalTokens(
             accessToken: nonEmpty(object["accessToken"] as? String)
                 ?? nonEmpty(object["access_token"] as? String),
             refreshToken: nonEmpty(object["refreshToken"] as? String)
-                ?? nonEmpty(object["refresh_token"] as? String)
+                ?? nonEmpty(object["refresh_token"] as? String),
+            cachedEmail: nonEmpty(object["email"] as? String)
+                ?? nonEmpty(object["cachedEmail"] as? String)
         )
     }
 
@@ -319,13 +386,14 @@ enum CursorAuth {
         }
         guard status == SQLITE_OK, let db else {
             if db != nil { sqlite3_close(db) }
-            return LocalTokens(accessToken: nil, refreshToken: nil)
+            return LocalTokens(accessToken: nil, refreshToken: nil, cachedEmail: nil)
         }
         defer { sqlite3_close(db) }
 
         return LocalTokens(
             accessToken: queryItem(db: db, key: "cursorAuth/accessToken"),
-            refreshToken: queryItem(db: db, key: "cursorAuth/refreshToken")
+            refreshToken: queryItem(db: db, key: "cursorAuth/refreshToken"),
+            cachedEmail: queryItem(db: db, key: "cursorAuth/cachedEmail")
         )
     }
 
