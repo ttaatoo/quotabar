@@ -97,13 +97,21 @@ enum HTTPClient {
                 guard let http = response as? HTTPURLResponse else {
                     throw QuotaError.network("Unexpected response from \(url.host ?? url.absoluteString).")
                 }
-                return HTTPResult(data: data, statusCode: http.statusCode)
+                return HTTPResult(
+                    data: data,
+                    statusCode: http.statusCode,
+                    contentType: http.value(forHTTPHeaderField: "Content-Type")
+                )
+            }
+            var headerFields: [String: String] = [:]
+            if let contentType = raw.contentType {
+                headerFields["Content-Type"] = contentType
             }
             guard let http = HTTPURLResponse(
                 url: url,
                 statusCode: raw.statusCode,
                 httpVersion: nil,
-                headerFields: nil
+                headerFields: headerFields
             ) else {
                 throw QuotaError.network("Unexpected response from \(url.host ?? url.absoluteString).")
             }
@@ -118,10 +126,17 @@ enum HTTPClient {
     private struct HTTPResult: Sendable {
         var data: Data
         var statusCode: Int
+        var contentType: String?
     }
 
     static func requireOK(_ response: HTTPURLResponse, data: Data, host: String) throws {
-        if response.statusCode == 401 || response.statusCode == 403 {
+        if response.statusCode == 401 {
+            throw QuotaError.unauthorized("\(host) rejected the session (\(response.statusCode)).")
+        }
+        if response.statusCode == 403 {
+            if CursorHTTP.isVercelCheckpoint(data: data) {
+                throw QuotaError.network(CursorHTTP.checkpointMessage)
+            }
             throw QuotaError.unauthorized("\(host) rejected the session (\(response.statusCode)).")
         }
         guard (200...299).contains(response.statusCode) else {

@@ -12,16 +12,29 @@ enum CursorAuth {
     static let unauthenticatedMessage =
         "cursor.com rejected the local session. Re-sign in inside Cursor.app, leave the optional cookie empty, then Refresh."
 
+    static let refreshFailedMessage =
+        "cursor.com rejected the local session (refresh failed). Re-sign in inside Cursor.app, leave the optional cookie empty, then Refresh."
+
+    static let noRefreshTokenMessage =
+        "cursor.com rejected the local session (no refresh token). Re-sign in inside Cursor.app, leave the optional cookie empty, then Refresh."
+
+    /// Public Cursor desktop client id used by `POST https://api2.cursor.sh/oauth/token`.
+    /// This is Cursor.app's own client, not a QuotaBar-registered OAuth app.
+    static let oauthClientID = "KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB"
+    static let defaultRefreshURL = URL(string: "https://api2.cursor.sh/oauth/token")!
+
     static func rejectedSessionMessage(status: Int) -> String {
         "cursor.com rejected the local session (\(status)). Re-sign in inside Cursor.app, leave the optional cookie empty, then Refresh."
     }
 
     static func isRejectedSessionMessage(_ message: String) -> Bool {
         let lower = message.lowercased()
+        if lower.contains("security checkpoint") { return false }
         return lower.contains("rejected")
-            || message.contains("403")
-            || message.contains("401")
             || lower.contains("not authenticated")
+            || lower.contains("refresh failed")
+            || lower.contains("no refresh token")
+            || message.contains("401")
     }
 
     static let defaultDBPath = FileManager.default.homeDirectoryForCurrentUser
@@ -36,14 +49,87 @@ enum CursorAuth {
         ]
     }()
 
+    enum SessionKind: Equatable, Sendable {
+        case pasted
+        case ambient
+    }
+
+    struct ResolvedSession: Equatable, Sendable {
+        var cookie: String
+        var kind: SessionKind
+        /// Raw JWT for `api2.cursor.sh` Bearer calls. Never the cookie header.
+        var accessToken: String?
+
+        var allowsRefresh: Bool { kind == .ambient }
+    }
+
+    struct RefreshPayload: Equatable, Sendable {
+        var accessToken: String
+        var refreshToken: String?
+        var shouldLogout: Bool
+    }
+
     static func resolveCookie(pasted: String?) throws -> String {
+        try resolveSession(pasted: pasted).cookie
+    }
+
+    /// Pasted Advanced cookie wins and is never replaced by an ambient refresh.
+    static func resolveSession(pasted: String?) throws -> ResolvedSession {
         if let pasted, let cookie = normalizePastedCookie(pasted) {
-            return cookie
+            return ResolvedSession(
+                cookie: cookie,
+                kind: .pasted,
+                accessToken: bearerAccessToken(fromCookie: cookie)
+            )
         }
-        if let token = readLocalAccessToken() {
-            return cookie(fromAccessToken: token)
+        if let token = resolveAmbientAccessToken() {
+            let bearer = bearerAccessToken(fromStored: token) ?? token
+            return ResolvedSession(
+                cookie: cookie(fromAccessToken: token),
+                kind: .ambient,
+                accessToken: bearer
+            )
         }
         throw QuotaError.notSignedIn(notSignedInMessage)
+    }
+
+    static func session(fromAccessToken token: String, kind: SessionKind) -> ResolvedSession {
+        let bearer = bearerAccessToken(fromStored: token) ?? token
+        return ResolvedSession(
+            cookie: cookie(fromAccessToken: token),
+            kind: kind,
+            accessToken: bearer
+        )
+    }
+
+    /// JWT used as `Authorization: Bearer` — not `WorkosCursorSessionToken=…`.
+    static func bearerAccessToken(fromStored raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if trimmed.contains("WorkosCursorSessionToken=")
+            || trimmed.contains("%3A%3A")
+            || trimmed.contains("::") {
+            return bearerAccessToken(fromCookie: cookie(fromAccessToken: trimmed))
+        }
+        return trimmed
+    }
+
+    static func bearerAccessToken(fromCookie cookie: String) -> String? {
+        for component in cookie.split(separator: ";") {
+            let pair = component.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            guard pair.count == 2 else { continue }
+            let name = pair[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard name == "WorkosCursorSessionToken" else { continue }
+            let encoded = pair[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = encoded.removingPercentEncoding ?? encoded
+            let token = value.components(separatedBy: "::").last ?? value
+            let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        if JWT.payload(cookie) != nil {
+            return cookie.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
     }
 
     static func cookie(fromAccessToken token: String) -> String {
@@ -110,29 +196,164 @@ enum CursorAuth {
         return nil
     }
 
-    static func readLocalAccessToken() -> String? {
-        if FileManager.default.fileExists(atPath: fileSystemPath(defaultDBPath)),
-           let token = readTokenFromSQLite(defaultDBPath),
-           !token.isEmpty {
-            return token
+    /// Prefer a QuotaBar-refreshed access token while Cursor's store still has
+    /// the stale token we replaced. If Cursor.app itself refreshed or the user
+    /// re-signed in, drop our cache and use the local token.
+    static func resolveAmbientAccessToken() -> String? {
+        let local = readLocalTokens()
+        let cached = SessionCache.load()
+        if let localAccess = local.accessToken, let cached {
+            if localAccess == cached.sourceAccessToken || localAccess == cached.accessToken {
+                return cached.accessToken
+            }
+            SessionCache.clear()
+            return localAccess
         }
-        for url in agentAuthPaths where FileManager.default.fileExists(atPath: fileSystemPath(url)) {
-            if let token = readAgentToken(url), !token.isEmpty {
-                return token
+        return cached?.accessToken ?? local.accessToken
+    }
+
+    static func readLocalAccessToken() -> String? {
+        readLocalTokens().accessToken
+    }
+
+    /// Exchange `cursorAuth/refreshToken` at Cursor's desktop token endpoint.
+    /// Persists the new access token in memory + QuotaBar Keychain only —
+    /// never writes `state.vscdb` or `~/.cursor`.
+    /// Returns the new access JWT (not a cookie).
+    static func refreshAmbientAccessToken() async throws -> String {
+        try await CursorRefreshGate.shared.run {
+            try await performRefresh()
+        }
+    }
+
+    /// Accepts both snake_case (`access_token`) and camelCase (`accessToken`).
+    static func parseRefreshResponse(_ object: [String: Any]) -> RefreshPayload {
+        let access = JSONWalk.string(object, keys: ["access_token", "accessToken"]) ?? ""
+        let refresh = JSONWalk.string(object, keys: ["refresh_token", "refreshToken"])
+        let shouldLogout: Bool
+        if let value = object["shouldLogout"] as? Bool {
+            shouldLogout = value
+        } else if let value = object["should_logout"] as? Bool {
+            shouldLogout = value
+        } else {
+            shouldLogout = false
+        }
+        return RefreshPayload(accessToken: access, refreshToken: refresh, shouldLogout: shouldLogout)
+    }
+
+    static func readLocalTokens() -> LocalTokens {
+        if FileManager.default.fileExists(atPath: fileSystemPath(defaultDBPath)) {
+            let tokens = readTokensFromSQLite(defaultDBPath)
+            if tokens.accessToken != nil || tokens.refreshToken != nil {
+                return tokens
             }
         }
-        return nil
+        for url in agentAuthPaths where FileManager.default.fileExists(atPath: fileSystemPath(url)) {
+            let tokens = readAgentTokens(url)
+            if tokens.accessToken != nil || tokens.refreshToken != nil {
+                return tokens
+            }
+        }
+        return LocalTokens(accessToken: nil, refreshToken: nil, cachedEmail: nil)
     }
 
-    private static func readAgentToken(_ url: URL) -> String? {
+    struct LocalTokens: Equatable, Sendable {
+        var accessToken: String?
+        var refreshToken: String?
+        var cachedEmail: String?
+    }
+
+    /// Copies the live Cursor DB (and WAL/SHM) then reads auth keys read-only.
+    static func readTokenFromSQLite(_ url: URL) -> String? {
+        readTokensFromSQLite(url).accessToken
+    }
+
+    private static func performRefresh() async throws -> String {
+        let local = readLocalTokens()
+        let cached = SessionCache.load()
+        guard let refreshToken = refreshTokenForRefresh(local: local, cached: cached) else {
+            throw QuotaError.unauthorized(noRefreshTokenMessage)
+        }
+
+        let url = refreshURL()
+        let (data, response) = try await HTTPClient.postJSON(
+            url: url,
+            body: [
+                "grant_type": "refresh_token",
+                "client_id": oauthClientID,
+                "refresh_token": refreshToken
+            ],
+            timeout: RefreshWork.oauthTimeout
+        )
+        let kind = CursorHTTP.classify(
+            status: response.statusCode,
+            data: data,
+            contentType: response.value(forHTTPHeaderField: "Content-Type")
+        )
+        switch kind {
+        case .checkpoint:
+            throw QuotaError.network(CursorHTTP.checkpointMessage)
+        case .unauthorized:
+            SessionCache.clear()
+            throw QuotaError.unauthorized(refreshFailedMessage)
+        case .failure:
+            try HTTPClient.requireOK(response, data: data, host: url.host ?? "api2.cursor.sh")
+        case .ok:
+            break
+        }
+
+        let object = try JSONWalk.object(from: data)
+        let parsed = parseRefreshResponse(object)
+        if parsed.shouldLogout || parsed.accessToken.isEmpty {
+            SessionCache.clear()
+            throw QuotaError.unauthorized(refreshFailedMessage)
+        }
+
+        let session = CachedSession(
+            accessToken: parsed.accessToken,
+            refreshToken: parsed.refreshToken ?? refreshToken,
+            sourceAccessToken: local.accessToken ?? cached?.sourceAccessToken
+        )
+        SessionCache.save(session)
+        return parsed.accessToken
+    }
+
+    private static func refreshTokenForRefresh(local: LocalTokens, cached: CachedSession?) -> String? {
+        if let cachedRefresh = cached?.refreshToken,
+           (cached?.sourceAccessToken == local.accessToken
+            || local.accessToken == nil
+            || local.accessToken == cached?.accessToken) {
+            return cachedRefresh
+        }
+        return local.refreshToken ?? cached?.refreshToken
+    }
+
+    private static func refreshURL() -> URL {
+        let override = ProcessInfo.processInfo.environment["CURSOR_REFRESH_TOKEN_URL_OVERRIDE"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !override.isEmpty, let url = URL(string: override) {
+            return url
+        }
+        return defaultRefreshURL
+    }
+
+    private static func readAgentTokens(_ url: URL) -> LocalTokens {
         guard let data = try? Data(contentsOf: url),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return nil }
-        return object["accessToken"] as? String
+        else {
+            return LocalTokens(accessToken: nil, refreshToken: nil, cachedEmail: nil)
+        }
+        return LocalTokens(
+            accessToken: nonEmpty(object["accessToken"] as? String)
+                ?? nonEmpty(object["access_token"] as? String),
+            refreshToken: nonEmpty(object["refreshToken"] as? String)
+                ?? nonEmpty(object["refresh_token"] as? String),
+            cachedEmail: nonEmpty(object["email"] as? String)
+                ?? nonEmpty(object["cachedEmail"] as? String)
+        )
     }
 
-    /// Copies the live Cursor DB (and WAL/SHM) then reads `cursorAuth/accessToken` read-only.
-    static func readTokenFromSQLite(_ url: URL) -> String? {
+    private static func readTokensFromSQLite(_ url: URL) -> LocalTokens {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("quotabar-cursor-\(UUID().uuidString)", isDirectory: true)
         do {
@@ -146,9 +367,9 @@ enum CursorAuth {
                 }
             }
             defer { try? FileManager.default.removeItem(at: tempDir) }
-            return queryAccessToken(at: dest)
+            return queryAuthTokens(at: dest)
         } catch {
-            return queryAccessToken(at: url)
+            return queryAuthTokens(at: url)
         }
     }
 
@@ -156,7 +377,7 @@ enum CursorAuth {
         url.path(percentEncoded: false)
     }
 
-    private static func queryAccessToken(at url: URL) -> String? {
+    private static func queryAuthTokens(at url: URL) -> LocalTokens {
         var db: OpaquePointer?
         let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
         let status = url.withUnsafeFileSystemRepresentation { cPath -> Int32 in
@@ -165,10 +386,18 @@ enum CursorAuth {
         }
         guard status == SQLITE_OK, let db else {
             if db != nil { sqlite3_close(db) }
-            return nil
+            return LocalTokens(accessToken: nil, refreshToken: nil, cachedEmail: nil)
         }
         defer { sqlite3_close(db) }
 
+        return LocalTokens(
+            accessToken: queryItem(db: db, key: "cursorAuth/accessToken"),
+            refreshToken: queryItem(db: db, key: "cursorAuth/refreshToken"),
+            cachedEmail: queryItem(db: db, key: "cursorAuth/cachedEmail")
+        )
+    }
+
+    private static func queryItem(db: OpaquePointer, key: String) -> String? {
         var stmt: OpaquePointer?
         let sql = "SELECT value FROM ItemTable WHERE key = ?1 LIMIT 1"
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
@@ -176,14 +405,113 @@ enum CursorAuth {
         }
         defer { sqlite3_finalize(stmt) }
 
-        let key = "cursorAuth/accessToken"
         let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
         sqlite3_bind_text(stmt, 1, key, -1, transient)
 
         guard sqlite3_step(stmt) == SQLITE_ROW, let cString = sqlite3_column_text(stmt, 0) else {
             return nil
         }
-        let value = String(cString: cString).trimmingCharacters(in: .whitespacesAndNewlines)
-        return value.isEmpty ? nil : value
+        return nonEmpty(String(cString: cString))
+    }
+
+    private static func nonEmpty(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+        return value
+    }
+}
+
+/// In-memory + Keychain cache of a QuotaBar-refreshed Cursor session.
+/// Never written to `state.vscdb` (Cursor may hold that file locked).
+private enum SessionCache {
+    private static let lock = NSLock()
+    private static var memory: CachedSession?
+
+    static func load() -> CachedSession? {
+        lock.lock()
+        defer { lock.unlock() }
+        if let memory {
+            return memory
+        }
+        let loaded = readKeychain()
+        memory = loaded
+        return loaded
+    }
+
+    static func save(_ session: CachedSession) {
+        lock.lock()
+        defer { lock.unlock() }
+        memory = session
+        if let encoded = session.encoded {
+            KeychainStore.set(encoded, account: .cursorRefreshedSession)
+        }
+    }
+
+    static func clear() {
+        lock.lock()
+        defer { lock.unlock() }
+        memory = nil
+        KeychainStore.delete(.cursorRefreshedSession)
+    }
+
+    private static func readKeychain() -> CachedSession? {
+        guard let raw = KeychainStore.get(.cursorRefreshedSession) else { return nil }
+        return CachedSession.decode(raw)
+    }
+}
+
+private struct CachedSession: Equatable, Sendable {
+    var accessToken: String
+    var refreshToken: String?
+    var sourceAccessToken: String?
+
+    var encoded: String? {
+        var object: [String: String] = ["accessToken": accessToken]
+        if let refreshToken {
+            object["refreshToken"] = refreshToken
+        }
+        if let sourceAccessToken {
+            object["sourceAccessToken"] = sourceAccessToken
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let text = String(data: data, encoding: .utf8)
+        else { return nil }
+        return text
+    }
+
+    static func decode(_ raw: String) -> CachedSession? {
+        guard let data = raw.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        let access = (object["accessToken"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !access.isEmpty else { return nil }
+        let refresh = (object["refreshToken"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let source = (object["sourceAccessToken"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return CachedSession(
+            accessToken: access,
+            refreshToken: (refresh?.isEmpty == false) ? refresh : nil,
+            sourceAccessToken: (source?.isEmpty == false) ? source : nil
+        )
+    }
+}
+
+/// Coalesce concurrent 403-driven refreshes so a rotating refresh token is
+/// not spent twice in the same poll.
+private actor CursorRefreshGate {
+    static let shared = CursorRefreshGate()
+    private var inFlight: Task<String, Error>?
+
+    func run(_ work: @Sendable @escaping () async throws -> String) async throws -> String {
+        if let inFlight {
+            return try await inFlight.value
+        }
+        let task = Task { try await work() }
+        inFlight = task
+        defer { inFlight = nil }
+        return try await task.value
     }
 }

@@ -807,25 +807,29 @@ struct SettingsView: View {
     }
 
     private var cursorEmptyMessage: String {
-        if cursorSessionRejected {
-            return "cursor.com rejected the local session. Re-sign in inside Cursor.app, leave Advanced empty, then Refresh."
+        if let cursorRejectedDetail {
+            return cursorRejectedDetail
         }
         return "Open Cursor.app and sign in. QuotaBar reads that local session."
     }
 
     private var cursorFooterCaption: String {
-        if cursorSessionRejected {
-            return "cursor.com rejected the local session. Re-sign in inside Cursor.app. Leave Advanced empty unless you paste a fresh WorkosCursorSessionToken."
+        if let cursorRejectedDetail {
+            return cursorRejectedDetail
         }
         return "Leave Advanced empty unless you paste a fresh WorkosCursorSessionToken."
     }
 
     private var cursorSessionRejected: Bool {
+        cursorRejectedDetail != nil
+    }
+
+    private var cursorRejectedDetail: String? {
         switch store.states[.cursor] {
         case .signedOut(let message), .failure(let message):
-            return CursorAuth.isRejectedSessionMessage(message)
+            return CursorAuth.isRejectedSessionMessage(message) ? message : nil
         default:
-            return false
+            return nil
         }
     }
 

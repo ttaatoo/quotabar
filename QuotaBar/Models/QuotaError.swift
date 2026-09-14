@@ -25,7 +25,7 @@ enum QuotaError: LocalizedError, Equatable, Sendable {
         switch self {
         case .notSignedIn, .unauthorized:
             return true
-        case .http(let code, _) where code == 401 || code == 403:
+        case .http(let code, _) where code == 401:
             return true
         default:
             return false

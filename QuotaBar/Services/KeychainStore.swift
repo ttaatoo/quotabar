@@ -3,6 +3,8 @@ import Security
 
 enum KeychainAccount: Hashable {
     case cursorCookie
+    /// QuotaBar-owned replacement after a desktop token refresh. Not the Advanced cookie.
+    case cursorRefreshedSession
     case chatgptCookie
     case chatgptJSON
     case glmAPIKey
@@ -16,6 +18,8 @@ enum KeychainAccount: Hashable {
         switch self {
         case .cursorCookie:
             return "cursor.cookie"
+        case .cursorRefreshedSession:
+            return "cursor.refreshed-session"
         case .chatgptCookie:
             return "chatgpt.cookie"
         case .chatgptJSON:

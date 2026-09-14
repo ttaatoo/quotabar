@@ -55,6 +55,7 @@
 		000000000000000000000095 /* grok.json in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000094 /* grok.json */; };
 		0000000000000000000000B3 /* opencodeGo.json in Resources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000B2 /* opencodeGo.json */; };
 		00000000000000000000004D /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 00000000000000000000004C /* libsqlite3.tbd */; };
+		000000000000000000000201 /* CursorClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000200 /* CursorClientTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -109,6 +110,8 @@
 		00000000000000000000003E /* QuotaBar.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = QuotaBar.entitlements; sourceTree = "<group>"; };
 		00000000000000000000004E /* QuotaBar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = QuotaBar.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		00000000000000000000004C /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
+		000000000000000000000200 /* CursorClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorClientTests.swift; sourceTree = "<group>"; };
+		000000000000000000000206 /* QuotaBarTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = QuotaBarTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -120,6 +123,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		000000000000000000000208 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -127,6 +137,7 @@
 			isa = PBXGroup;
 			children = (
 				000000000000000000000040 /* QuotaBar */,
+				00000000000000000000020B /* QuotaBarTests */,
 				000000000000000000000047 /* Products */,
 				00000000000000000000004C /* libsqlite3.tbd */,
 			);
@@ -240,12 +251,39 @@
 			isa = PBXGroup;
 			children = (
 				00000000000000000000004E /* QuotaBar.app */,
+				000000000000000000000206 /* QuotaBarTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
+		00000000000000000000020B /* QuotaBarTests */ = {
+			isa = PBXGroup;
+			children = (
+				000000000000000000000200 /* CursorClientTests.swift */,
+			);
+			path = QuotaBarTests;
+			sourceTree = "<group>";
+		};
 
 /* End PBXGroup section */
+
+/* Begin PBXContainerItemProxy section */
+		00000000000000000000020A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 00000000000000000000004F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 000000000000000000000048;
+			remoteInfo = QuotaBar;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		000000000000000000000209 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 000000000000000000000048 /* QuotaBar */;
+			targetProxy = 00000000000000000000020A /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXNativeTarget section */
 		000000000000000000000048 /* QuotaBar */ = {
@@ -265,6 +303,23 @@
 			productReference = 00000000000000000000004E /* QuotaBar.app */;
 			productType = "com.apple.product-type.application";
 		};
+		000000000000000000000202 /* QuotaBarTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 000000000000000000000205 /* Build configuration list for PBXNativeTarget "QuotaBarTests" */;
+			buildPhases = (
+				000000000000000000000207 /* Sources */,
+				000000000000000000000208 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				000000000000000000000209 /* PBXTargetDependency */,
+			);
+			name = QuotaBarTests;
+			productName = QuotaBarTests;
+			productReference = 000000000000000000000206 /* QuotaBarTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -277,6 +332,10 @@
 				TargetAttributes = {
 					000000000000000000000048 = {
 						CreatedOnToolsVersion = 15.4;
+					};
+					000000000000000000000202 = {
+						CreatedOnToolsVersion = 15.4;
+						TestTargetID = 000000000000000000000048;
 					};
 				};
 			};
@@ -294,6 +353,7 @@
 			projectRoot = "";
 			targets = (
 				000000000000000000000048 /* QuotaBar */,
+				000000000000000000000202 /* QuotaBarTests */,
 			);
 		};
 /* End PBXProject section */
@@ -360,6 +420,14 @@
 				000000000000000000000032 /* SettingsWindowController.swift in Sources */,
 				000000000000000000000071 /* CodexLoginWindowController.swift in Sources */,
 				000000000000000000000034 /* StatusItemRenderer.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		000000000000000000000207 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				000000000000000000000201 /* CursorClientTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -456,6 +524,40 @@
 			};
 			name = Release;
 		};
+		000000000000000000000203 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.quotabar.QuotaBarTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/QuotaBar.app/Contents/MacOS/QuotaBar";
+			};
+			name = Debug;
+		};
+		000000000000000000000204 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.quotabar.QuotaBarTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/QuotaBar.app/Contents/MacOS/QuotaBar";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -473,6 +575,15 @@
 			buildConfigurations = (
 				000000000000000000000054 /* Debug */,
 				000000000000000000000055 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		000000000000000000000205 /* Build configuration list for PBXNativeTarget "QuotaBarTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				000000000000000000000203 /* Debug */,
+				000000000000000000000204 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
