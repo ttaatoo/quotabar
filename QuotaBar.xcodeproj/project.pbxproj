@@ -29,6 +29,7 @@
 		000000000000000000000022 /* GLMClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000021 /* GLMClient.swift */; };
 		000000000000000000000091 /* GrokAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000090 /* GrokAuth.swift */; };
 		000000000000000000000093 /* GrokClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000092 /* GrokClient.swift */; };
+		000000000000000000000161 /* GrokAccountIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000160 /* GrokAccountIdentity.swift */; };
 		0000000000000000000000F1 /* GrokCLILocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000F0 /* GrokCLILocator.swift */; };
 		0000000000000000000000F3 /* GrokLoginWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000F2 /* GrokLoginWindowController.swift */; };
 		0000000000000000000000B1 /* OpenCodeGoClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000B0 /* OpenCodeGoClient.swift */; };
@@ -56,6 +57,7 @@
 		0000000000000000000000B3 /* opencodeGo.json in Resources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000B2 /* opencodeGo.json */; };
 		00000000000000000000004D /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 00000000000000000000004C /* libsqlite3.tbd */; };
 		000000000000000000000201 /* CursorClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000200 /* CursorClientTests.swift */; };
+		000000000000000000000221 /* GrokAccountTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000220 /* GrokAccountTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -81,6 +83,7 @@
 		000000000000000000000021 /* GLMClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GLMClient.swift; sourceTree = "<group>"; };
 		000000000000000000000090 /* GrokAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokAuth.swift; sourceTree = "<group>"; };
 		000000000000000000000092 /* GrokClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokClient.swift; sourceTree = "<group>"; };
+		000000000000000000000160 /* GrokAccountIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokAccountIdentity.swift; sourceTree = "<group>"; };
 		0000000000000000000000F0 /* GrokCLILocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokCLILocator.swift; sourceTree = "<group>"; };
 		0000000000000000000000F2 /* GrokLoginWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokLoginWindowController.swift; sourceTree = "<group>"; };
 		0000000000000000000000B0 /* OpenCodeGoClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGoClient.swift; sourceTree = "<group>"; };
@@ -111,6 +114,7 @@
 		00000000000000000000004E /* QuotaBar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = QuotaBar.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		00000000000000000000004C /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
 		000000000000000000000200 /* CursorClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorClientTests.swift; sourceTree = "<group>"; };
+		000000000000000000000220 /* GrokAccountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokAccountTests.swift; sourceTree = "<group>"; };
 		000000000000000000000206 /* QuotaBarTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = QuotaBarTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -197,6 +201,7 @@
 				00000000000000000000001F /* ChatGPTClient.swift */,
 				000000000000000000000021 /* GLMClient.swift */,
 				000000000000000000000090 /* GrokAuth.swift */,
+				000000000000000000000160 /* GrokAccountIdentity.swift */,
 				0000000000000000000000F0 /* GrokCLILocator.swift */,
 				000000000000000000000092 /* GrokClient.swift */,
 				0000000000000000000000B0 /* OpenCodeGoClient.swift */,
@@ -260,6 +265,7 @@
 			isa = PBXGroup;
 			children = (
 				000000000000000000000200 /* CursorClientTests.swift */,
+				000000000000000000000220 /* GrokAccountTests.swift */,
 			);
 			path = QuotaBarTests;
 			sourceTree = "<group>";
@@ -402,6 +408,7 @@
 				000000000000000000000020 /* ChatGPTClient.swift in Sources */,
 				000000000000000000000022 /* GLMClient.swift in Sources */,
 				000000000000000000000091 /* GrokAuth.swift in Sources */,
+				000000000000000000000161 /* GrokAccountIdentity.swift in Sources */,
 				0000000000000000000000F1 /* GrokCLILocator.swift in Sources */,
 				000000000000000000000093 /* GrokClient.swift in Sources */,
 				0000000000000000000000F3 /* GrokLoginWindowController.swift in Sources */,
@@ -428,6 +435,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				000000000000000000000201 /* CursorClientTests.swift in Sources */,
+				000000000000000000000221 /* GrokAccountTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

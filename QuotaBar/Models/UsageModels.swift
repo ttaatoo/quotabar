@@ -250,4 +250,10 @@ enum ProviderLoadState: Equatable, Sendable {
         if case .signedOut = self { return true }
         return false
     }
+
+    /// User-initiated Retry must leave `.failure` so the card is not a no-op.
+    var showsUserInitiatedLoading: Bool {
+        if case .ready = self { return false }
+        return true
+    }
 }

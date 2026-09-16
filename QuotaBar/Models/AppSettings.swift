@@ -303,7 +303,8 @@ struct AppSettings: Equatable, Codable {
             } else {
                 grokAccounts[index].label = trimmed
             }
-            if let email = grokAccounts[index].email?.trimmingCharacters(in: .whitespacesAndNewlines), email.isEmpty {
+            if let email = grokAccounts[index].email?.trimmingCharacters(in: .whitespacesAndNewlines),
+               email.isEmpty || CodexCLIAuth.usableEmail(email) == nil {
                 grokAccounts[index].email = nil
             }
             if let home = grokAccounts[index].grokHomePath?.trimmingCharacters(in: .whitespacesAndNewlines) {

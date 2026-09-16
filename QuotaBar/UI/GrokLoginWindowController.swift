@@ -281,11 +281,12 @@ final class GrokLoginWindowController: NSWindowController, NSWindowDelegate {
                 return
             }
             let ambient = GrokAuth.isAmbientHome(home)
+            let identity = GrokAccountIdentity.resolve(credentials: credentials).display
             switch mode {
             case .addAccount:
                 let id = AppStore.shared.upsertGrokAccountFromHome(
                     homePath: home.path(percentEncoded: false),
-                    email: credentials.email,
+                    email: identity,
                     ambient: !usedPrivateHome && ambient
                 )
                 if id == nil {
@@ -293,15 +294,15 @@ final class GrokLoginWindowController: NSWindowController, NSWindowDelegate {
                     finish(.failed("Signed in, but QuotaBar could not add the account."))
                     return
                 }
-                finish(.imported(email: credentials.email))
+                finish(.imported(email: identity))
             case .relogin(let accountId, _, let usesAmbient):
                 AppStore.shared.applyGrokRelogin(
                     accountId: accountId,
                     homePath: home.path(percentEncoded: false),
-                    email: credentials.email,
+                    email: identity,
                     ambient: usesAmbient || ambient
                 )
-                finish(.relogged(email: credentials.email))
+                finish(.relogged(email: identity))
             }
         case .cancelled:
             discardCreatedHomeIfNeeded()
