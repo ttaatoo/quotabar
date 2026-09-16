@@ -712,7 +712,7 @@ struct SettingsView: View {
             HStack(alignment: .center, spacing: 10) {
                 SettingsProviderWell(provider: .grok, size: 22, iconSize: 13)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(account.displayTitle)
+                    Text(store.grokDisplayTitle(for: account))
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Theme.settingsPrimary)
                         .lineLimit(1)

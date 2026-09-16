@@ -27,14 +27,18 @@ enum GrokClient {
         let object = try JSONWalk.object(from: data)
         let extras = await fetchSettingsExtras(token: credentials.accessToken)
         let plan = extras.plan ?? credentials.planFallback
+        let identity = GrokAccountIdentity.resolve(
+            credentials: credentials,
+            settingsEmail: extras.email
+        )
         var snapshot = try parse(
             object,
-            email: credentials.email ?? extras.email,
+            email: identity.cardIdentity,
             planFallback: plan,
             fetchedAt: now
         )
         if snapshot.accountEmail == nil {
-            snapshot.accountEmail = extras.email ?? AccountIdentity.fromToken(credentials.accessToken)
+            snapshot.accountEmail = identity.cardIdentity
         }
         return snapshot
     }
@@ -56,7 +60,7 @@ enum GrokClient {
             let plan = GrokAuth.displayPlanName(
                 JSONWalk.string(object, keys: ["subscription_tier_display", "subscriptionTierDisplay"])
             )
-            return (plan, AccountIdentity.fromJSON(object))
+            return (plan, GrokAccountIdentity.emailFromUserObject(object))
         } catch {
             return (nil, nil)
         }
@@ -117,8 +121,8 @@ enum GrokClient {
             extraFooter: nil
         )
         snapshot.accountEmail = email
-            ?? AccountIdentity.fromJSON(raw)
-            ?? JSONWalk.string(raw, keys: ["email", "accountEmail"])
+            ?? GrokAccountIdentity.emailFromUserObject(raw)
+            ?? GrokAccountIdentity.emailFromUserObject(config)
         return snapshot
     }
 

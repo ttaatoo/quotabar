@@ -113,8 +113,7 @@ final class AppStore: ObservableObject {
 
     var grokEmail: String? {
         if let id = activeGrokAccountId {
-            return settings.grokAccounts.first(where: { $0.id == id })?.email
-                ?? grokStates[id]?.snapshot?.accountEmail
+            return grokDisplayTitle(for: id)
         }
         return states[.grok]?.snapshot?.accountEmail
             ?? GrokAuth.loadAuthFile()?.email
@@ -179,7 +178,7 @@ final class AppStore: ObservableObject {
                 }
                 return AccountCardRow(
                     id: row.id.uuidString,
-                    email: row.account?.email ?? row.state.snapshot?.accountEmail,
+                    email: grokDisplayTitle(for: row.id) ?? row.state.snapshot?.accountEmail,
                     fallbackTitle: row.account?.label ?? "Grok",
                     state: row.state,
                     hasCredentials: credentials
@@ -1655,9 +1654,17 @@ extension AppStore {
         let standardizedHome = GrokAuth.homeURL(path: homePath)?.path(percentEncoded: false) ?? homePath
         settings.grokAccounts[index].grokHomePath = standardizedHome
         settings.grokAccounts[index].usesAmbientAuthFile = ambient
-        if let trimmed = AccountIdentity.usableHandle(email) {
-            settings.grokAccounts[index].email = trimmed
-        }
+        let creds = GrokAuth.homeURL(path: standardizedHome).flatMap { GrokAuth.loadAuthFile(home: $0) }
+        GrokAccountIdentity.assignIdentity(
+            email,
+            fallback: GrokAccountIdentity.uniqueFallback(
+                token: creds?.accessToken,
+                userId: creds?.userId,
+                homePath: standardizedHome
+            ),
+            to: accountId,
+            accounts: &settings.grokAccounts
+        )
         if previousHome != standardizedHome {
             GrokAuth.removeManagedHomeIfSafe(previousHome)
         }
@@ -1672,34 +1679,21 @@ extension AppStore {
         email: String?,
         ambient: Bool
     ) -> UUID? {
-        let trimmedEmail = AccountIdentity.usableHandle(email)
         let standardizedHome = GrokAuth.homeURL(path: homePath)?.path(percentEncoded: false) ?? homePath
-
-        if let trimmedEmail,
-           let existing = settings.grokAccounts.first(where: {
-               $0.email?.caseInsensitiveCompare(trimmedEmail) == .orderedSame
-           }) {
-            if let index = settings.grokAccounts.firstIndex(where: { $0.id == existing.id }) {
-                let previousHome = settings.grokAccounts[index].grokHomePath
-                settings.grokAccounts[index].email = trimmedEmail
-                settings.grokAccounts[index].grokHomePath = standardizedHome
-                settings.grokAccounts[index].usesAmbientAuthFile = ambient
-                if previousHome != standardizedHome {
-                    GrokAuth.removeManagedHomeIfSafe(previousHome)
-                }
-            }
-            settings.selectedGrokAccountId = existing.id
-            persistSettings()
-            Task { await refreshGrokAccount(existing.id, userInitiated: true) }
-            return existing.id
-        }
-
-        let label = trimmedEmail ?? nextGrokLabel()
-        let id = addGrokAccount(label: label)
-        if let index = settings.grokAccounts.firstIndex(where: { $0.id == id }) {
-            settings.grokAccounts[index].email = trimmedEmail
-            settings.grokAccounts[index].grokHomePath = standardizedHome
-            settings.grokAccounts[index].usesAmbientAuthFile = ambient
+        let creds = GrokAuth.homeURL(path: standardizedHome).flatMap { GrokAuth.loadAuthFile(home: $0) }
+        let existed = Set(settings.grokAccounts.map(\.id))
+        let id = GrokAccountIdentity.upsertFromHome(
+            accounts: &settings.grokAccounts,
+            homePath: standardizedHome,
+            email: email ?? creds?.email,
+            ambient: ambient,
+            accessToken: creds?.accessToken,
+            userId: creds?.userId,
+            nextLabel: nextGrokLabel()
+        )
+        if !existed.contains(id) {
+            grokTokens[id] = grokTokens[id] ?? ""
+            grokStates[id] = .idle
         }
         settings.selectedGrokAccountId = id
         persistSettings()
@@ -1716,28 +1710,21 @@ extension AppStore {
     func importAmbientGrokAccountIfAvailable() -> UUID? {
         if hasAmbientGrokAccount { return nil }
         guard let creds = GrokAuth.loadAuthFile() else { return nil }
-        let email = creds.email ?? AccountIdentity.fromToken(creds.accessToken)
+        let email = GrokAccountIdentity.resolve(credentials: creds).cardIdentity
         let ambientPath = GrokAuth.defaultHomeURL().path(percentEncoded: false)
-        if let email,
-           let existing = settings.grokAccounts.first(where: {
-               $0.email?.caseInsensitiveCompare(email) == .orderedSame
-           }) {
-            if let index = settings.grokAccounts.firstIndex(where: { $0.id == existing.id }) {
-                settings.grokAccounts[index].email = email
-                settings.grokAccounts[index].usesAmbientAuthFile = true
-                settings.grokAccounts[index].grokHomePath = ambientPath
-            }
-            settings.selectedGrokAccountId = existing.id
-            persistSettings()
-            Task { await refreshGrokAccount(existing.id, userInitiated: true) }
-            return existing.id
-        }
-
-        let id = addGrokAccount(label: email ?? nextGrokLabel())
-        if let index = settings.grokAccounts.firstIndex(where: { $0.id == id }) {
-            settings.grokAccounts[index].email = email
-            settings.grokAccounts[index].usesAmbientAuthFile = true
-            settings.grokAccounts[index].grokHomePath = ambientPath
+        let existed = Set(settings.grokAccounts.map(\.id))
+        let id = GrokAccountIdentity.upsertFromHome(
+            accounts: &settings.grokAccounts,
+            homePath: ambientPath,
+            email: email,
+            ambient: true,
+            accessToken: creds.accessToken,
+            userId: creds.userId,
+            nextLabel: nextGrokLabel()
+        )
+        if !existed.contains(id) {
+            grokTokens[id] = grokTokens[id] ?? ""
+            grokStates[id] = .idle
         }
         settings.selectedGrokAccountId = id
         persistSettings()
@@ -1907,13 +1894,46 @@ extension AppStore {
         }
     }
 
+    func grokDisplayTitle(for id: UUID) -> String? {
+        grokDisplayTitles()[id]
+    }
+
+    func grokDisplayTitle(for account: GrokAccount) -> String {
+        grokDisplayTitle(for: account.id) ?? account.displayTitle
+    }
+
+    private func grokDisplayTitles() -> [UUID: String] {
+        let inputs = settings.grokAccounts.map { account in
+            GrokAccountIdentity.CardInput(
+                id: account.id,
+                storedEmail: account.email,
+                snapshotEmail: grokStates[account.id]?.snapshot?.accountEmail,
+                label: account.label,
+                uniqueFallback: GrokAccountIdentity.uniqueFallback(
+                    account: account,
+                    pastedToken: emptyToNil(grokTokens[account.id, default: ""])
+                )
+            )
+        }
+        return GrokAccountIdentity.cardTitles(inputs)
+    }
+
     private func recordGrokIdentity(_ identity: String?, for id: UUID) {
-        let trimmed = AccountIdentity.usableHandle(identity)
-        guard let trimmed else { return }
         guard let index = settings.grokAccounts.firstIndex(where: { $0.id == id }) else { return }
-        guard settings.grokAccounts[index].email != trimmed else { return }
-        settings.grokAccounts[index].email = trimmed
-        persistSettings()
+        let before = settings.grokAccounts[index].email
+        let fallback = GrokAccountIdentity.uniqueFallback(
+            account: settings.grokAccounts[index],
+            pastedToken: emptyToNil(grokTokens[id, default: ""])
+        )
+        GrokAccountIdentity.assignIdentity(
+            identity,
+            fallback: fallback,
+            to: id,
+            accounts: &settings.grokAccounts
+        )
+        if settings.grokAccounts[index].email != before {
+            persistSettings()
+        }
     }
 }
 

@@ -8,6 +8,7 @@ enum GrokAuth {
     struct Credentials: Equatable {
         var accessToken: String
         var email: String?
+        var userId: String?
         var expiresAt: Date?
         var authMode: String?
         var teamId: String?
@@ -138,6 +139,7 @@ enum GrokAuth {
             return Credentials(
                 accessToken: token,
                 email: AccountIdentity.fromToken(token),
+                userId: JWT.trailingSubject(token),
                 expiresAt: nil,
                 authMode: "oidc",
                 teamId: nil,
@@ -158,6 +160,7 @@ enum GrokAuth {
             return Credentials(
                 accessToken: token,
                 email: AccountIdentity.fromToken(token),
+                userId: JWT.trailingSubject(token),
                 expiresAt: nil,
                 authMode: "oidc",
                 teamId: nil,
@@ -234,11 +237,14 @@ enum GrokAuth {
         guard !token.isEmpty else { return nil }
 
         let email = JSONWalk.string(preferred.entry, keys: ["email"])
-            ?? AccountIdentity.fromJSON(preferred.entry)
+            ?? CodexCLIAuth.email(from: preferred.entry)
+            ?? GrokAccountIdentity.jwtEmail(token)
             ?? AccountIdentity.fromToken(token)
         return Credentials(
             accessToken: token,
             email: email,
+            userId: JSONWalk.string(preferred.entry, keys: ["user_id", "userId"])
+                ?? JWT.trailingSubject(token),
             expiresAt: TimeFormatting.parseDate(preferred.entry["expires_at"]),
             authMode: JSONWalk.string(preferred.entry, keys: ["auth_mode"]),
             teamId: JSONWalk.string(preferred.entry, keys: ["team_id"]),
@@ -259,6 +265,32 @@ enum GrokAuth {
         if lower.hasPrefix("xai-") { return nil }
         if token.contains("=") { return nil }
         return token
+    }
+
+    static func standardizedHomePath(_ path: String?) -> String? {
+        guard let url = homeURL(path: path) else { return nil }
+        return standardizedPath(url)
+    }
+
+    static func homesMatch(_ lhs: String?, _ rhs: String?) -> Bool {
+        guard let left = standardizedHomePath(lhs), let right = standardizedHomePath(rhs) else {
+            return false
+        }
+        return left == right
+    }
+
+    static func credentials(for account: GrokAccount) -> Credentials? {
+        if let url = homeURL(path: account.grokHomePath) {
+            return loadAuthFile(home: url)
+        }
+        if account.usesAmbientAuthFile {
+            return loadAuthFile()
+        }
+        return nil
+    }
+
+    static func accessToken(for account: GrokAccount) -> String? {
+        credentials(for: account)?.accessToken
     }
 
     static func displayPlanName(_ raw: String?) -> String? {
