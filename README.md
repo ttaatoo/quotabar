@@ -1,6 +1,6 @@
 # QuotaBar
 
-A menu-bar-only macOS 14+ utility (**0.0.17**) that shows remaining **Cursor**, **ChatGPT**, **GLM**, **Grok**, and **OpenCode Go** quota. One pill in the status bar, one compact popover. No Dock icon, no telemetry.
+A menu-bar-only macOS 14+ utility (**0.0.18**) that shows remaining **Cursor**, **ChatGPT**, **GLM**, **Grok**, and **OpenCode Go** quota. One pill in the status bar, one compact popover. No Dock icon, no telemetry.
 
 ## Screenshots
 
