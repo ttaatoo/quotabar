@@ -114,7 +114,7 @@ struct PopoverView: View {
                     provider: store.selected,
                     mode: store.settings.displayMode,
                     now: store.now,
-                    onRetry: { Task { await store.refreshCard(row.id) } },
+                    onRetry: { store.recoverAccountCard(row.id) },
                     onOpenSettings: store.openSettings,
                     isActive: store.isActiveAccountCard(row.id),
                     onActivate: (store.selected == .chatgpt || store.selected == .opencodeGo || store.selected == .grok)
@@ -266,7 +266,7 @@ struct AccountCard: View {
                 EmptyStateView(
                     title: (row.hasCredentials || hasKnownEmail) ? "Couldn’t refresh" : "Couldn’t load",
                     message: shortFailure(message),
-                    actionTitle: "Retry",
+                    actionTitle: row.recoveryTitle,
                     action: onRetry,
                     onSelect: onActivate
                 )
@@ -407,7 +407,7 @@ struct AccountCard: View {
             EmptyStateView(
                 title: "Couldn’t refresh",
                 message: "This account is still saved. Retry, or re-add it in Settings if the session expired.",
-                actionTitle: "Retry",
+                actionTitle: row.recoveryTitle,
                 action: onRetry,
                 onSelect: onActivate
             )

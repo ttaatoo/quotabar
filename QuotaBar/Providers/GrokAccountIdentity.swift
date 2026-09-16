@@ -14,6 +14,28 @@ enum GrokAccountIdentity {
         var cardIdentity: String? { display ?? uniqueFallback }
     }
 
+    enum Recovery: Equatable {
+        case retryRefresh
+        case relogin
+
+        var buttonTitle: String {
+            switch self {
+            case .retryRefresh: return "Retry"
+            case .relogin: return "Re-login"
+            }
+        }
+
+        /// Expired Grok sessions cannot be recovered by re-reading auth.json.
+        static func action(for state: ProviderLoadState) -> Recovery {
+            switch state {
+            case .failure(let message), .signedOut(let message):
+                return GrokAuth.isExpiredTokenMessage(message) ? .relogin : .retryRefresh
+            default:
+                return .retryRefresh
+            }
+        }
+    }
+
     struct CardInput: Equatable {
         var id: UUID
         var storedEmail: String?
@@ -107,12 +129,10 @@ enum GrokAccountIdentity {
         email: String?,
         ambient: Bool,
         accessToken: String?,
-        userId: String? = nil,
         nextLabel: String
     ) -> UUID {
         let standardizedHome = GrokAuth.homeURL(path: homePath)?.path(percentEncoded: false) ?? homePath
         let incoming = AccountIdentity.usableHandle(email)
-        let fallback = uniqueFallback(token: accessToken, userId: userId, homePath: standardizedHome)
 
         if let existing = matchExisting(
             accounts: accounts,
@@ -134,7 +154,7 @@ enum GrokAccountIdentity {
                     accounts[index].grokHomePath = standardizedHome
                 }
             }
-            assignIdentity(incoming, fallback: fallback, to: existing.id, accounts: &accounts)
+            assignIdentity(incoming, to: existing.id, accounts: &accounts)
             return existing.id
         }
 
@@ -153,22 +173,21 @@ enum GrokAccountIdentity {
                 grokHomePath: standardizedHome
             )
         )
-        assignIdentity(incoming, fallback: fallback, to: id, accounts: &accounts)
+        assignIdentity(incoming, to: id, accounts: &accounts)
         return id
     }
 
-    /// Persist an identity only when no other row already uses it.
+    /// Persist a real email only when no other row already uses it.
+    /// Never writes a JWT subject / home id into `email`.
     @discardableResult
     static func assignIdentity(
         _ identity: String?,
-        fallback: String?,
         to id: UUID,
         accounts: inout [GrokAccount]
     ) -> Bool {
         guard let index = accounts.firstIndex(where: { $0.id == id }) else { return false }
         let preferred = CodexCLIAuth.usableEmail(identity)
-            ?? AccountIdentity.usableHandle(identity)
-        let unique = AccountIdentity.usableHandle(fallback)
+        let currentEmail = CodexCLIAuth.usableEmail(accounts[index].email)
         let colliding: Bool = {
             guard let preferred else { return false }
             return accounts.contains {
@@ -180,15 +199,13 @@ enum GrokAccountIdentity {
         if let preferred, !colliding {
             next = preferred
         } else if colliding {
-            if let current = accounts[index].email,
-               let preferred,
-               current.caseInsensitiveCompare(preferred) != .orderedSame {
-                next = current
+            if let currentEmail, currentEmail.caseInsensitiveCompare(preferred ?? "") != .orderedSame {
+                next = currentEmail
             } else {
-                next = unique
+                next = nil
             }
         } else {
-            next = accounts[index].email ?? unique
+            next = currentEmail
         }
         guard accounts[index].email != next else { return false }
         accounts[index].email = next
@@ -201,8 +218,8 @@ enum GrokAccountIdentity {
         var taken = Set<String>()
         var result: [UUID: String] = [:]
         for card in cards {
-            let preferred = AccountIdentity.usableHandle(card.snapshotEmail)
-                ?? AccountIdentity.usableHandle(card.storedEmail)
+            let preferred = CodexCLIAuth.usableEmail(card.snapshotEmail)
+                ?? CodexCLIAuth.usableEmail(card.storedEmail)
             var candidates: [String] = []
             if let preferred {
                 candidates.append(preferred)

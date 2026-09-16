@@ -15,7 +15,13 @@ enum GrokAuth {
         var oidcScope: String?
         var source: Source
 
+        /// Prefer JWT `exp` when the bearer is a JWT. `auth.json` `expires_at`
+        /// can be a stale carried field from a previous profile and would
+        /// otherwise mark a still-valid token as dead.
         var isExpired: Bool {
+            if let jwtExp = JWT.expiration(accessToken) {
+                return Date() >= jwtExp
+            }
             guard let expiresAt else { return false }
             return Date() >= expiresAt
         }
@@ -51,6 +57,14 @@ enum GrokAuth {
 
     static let signInHint =
         "Add a Grok account in Settings to sign in with the Grok CLI in your browser."
+    static let expiredTokenMessage =
+        "Grok token expired. Re-login this account."
+
+    static func isExpiredTokenMessage(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        return lower.contains("grok token expired")
+            || (lower.contains("token expired") && lower.contains("re-login"))
+    }
 
     static func grokHomeURL(env: [String: String] = ProcessInfo.processInfo.environment) -> URL {
         defaultHomeURL(env: env)
@@ -170,10 +184,10 @@ enum GrokAuth {
         }
 
         if let fileHome, let file = loadAuthFile(home: fileHome), file.isExpired {
-            throw QuotaError.notSignedIn("Grok token expired. Re-login this account in Settings.")
+            throw QuotaError.notSignedIn(expiredTokenMessage)
         }
         if readAmbient, let file = loadAuthFile(env: env), file.isExpired {
-            throw QuotaError.notSignedIn("Grok token expired. Re-login this account in Settings.")
+            throw QuotaError.notSignedIn(expiredTokenMessage)
         }
 
         if let pasted, !pasted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -245,7 +259,9 @@ enum GrokAuth {
             email: email,
             userId: JSONWalk.string(preferred.entry, keys: ["user_id", "userId"])
                 ?? JWT.trailingSubject(token),
-            expiresAt: TimeFormatting.parseDate(preferred.entry["expires_at"]),
+            expiresAt: TimeFormatting.parseDate(
+                preferred.entry["expires_at"] ?? preferred.entry["expiresAt"]
+            ),
             authMode: JSONWalk.string(preferred.entry, keys: ["auth_mode"]),
             teamId: JSONWalk.string(preferred.entry, keys: ["team_id"]),
             oidcScope: preferred.scope,

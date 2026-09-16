@@ -150,7 +150,6 @@ final class GrokAccountTests: XCTestCase {
             email: "shared@example.com",
             ambient: false,
             accessToken: tokenB,
-            userId: "ub",
             nextLabel: "Grok 2"
         )
 
@@ -177,7 +176,6 @@ final class GrokAccountTests: XCTestCase {
             email: "same@example.com",
             ambient: false,
             accessToken: token,
-            userId: "u",
             nextLabel: "Grok"
         )
         let second = GrokAccountIdentity.upsertFromHome(
@@ -186,7 +184,6 @@ final class GrokAccountTests: XCTestCase {
             email: "same@example.com",
             ambient: false,
             accessToken: token,
-            userId: "u",
             nextLabel: "Grok 2"
         )
 
@@ -204,13 +201,100 @@ final class GrokAccountTests: XCTestCase {
         ]
         GrokAccountIdentity.assignIdentity(
             "owner@example.com",
-            fallback: "subj-b",
             to: idB,
             accounts: &accounts
         )
         XCTAssertEqual(accounts.first { $0.id == idA }?.email, "owner@example.com")
-        XCTAssertEqual(accounts.first { $0.id == idB }?.email, "subj-b")
+        XCTAssertNil(accounts.first { $0.id == idB }?.email)
         XCTAssertEqual(accounts.first { $0.id == idA }?.grokHomePath, "/tmp/a")
+    }
+
+    func testCardTitleUsesLabelWhenStoredIdentityIsNotAnEmail() {
+        let id = UUID()
+        let titles = GrokAccountIdentity.cardTitles([
+            .init(
+                id: id,
+                storedEmail: "7be62955…",
+                snapshotEmail: nil,
+                label: "Grok 2",
+                uniqueFallback: "7be62955…"
+            )
+        ])
+        XCTAssertEqual(titles[id], "Grok 2")
+    }
+
+    func testExpiredFailureCardRecoversWithReloginNotSilentRetry() {
+        let expired = ProviderLoadState.failure(GrokAuth.expiredTokenMessage)
+        XCTAssertEqual(GrokAccountIdentity.Recovery.action(for: expired), .relogin)
+        XCTAssertEqual(GrokAccountIdentity.Recovery.action(for: expired).buttonTitle, "Re-login")
+        XCTAssertTrue(expired.showsUserInitiatedLoading)
+        XCTAssertEqual(
+            GrokAccountIdentity.Recovery.action(for: .failure("Timed out after 30s.")),
+            .retryRefresh
+        )
+        let ready = ProviderLoadState.ready(
+            UsageSnapshot(
+                provider: .grok,
+                planName: "SuperGrok",
+                fetchedAt: Date(),
+                session: nil,
+                weekly: nil,
+                source: .live,
+                extraFooter: nil
+            )
+        )
+        XCTAssertFalse(ready.showsUserInitiatedLoading)
+        XCTAssertEqual(GrokAccountIdentity.Recovery.action(for: ready), .retryRefresh)
+    }
+
+    func testStaleAuthExpiresAtDoesNotExpireALiveJWT() throws {
+        let token = jwt(sub: "still-good", email: "beta@example.com", exp: Date().addingTimeInterval(3600))
+        let creds = GrokAuth.Credentials(
+            accessToken: token,
+            email: "beta@example.com",
+            userId: "beta",
+            expiresAt: Date(timeIntervalSince1970: 1_600_000_000),
+            authMode: "oidc",
+            teamId: nil,
+            oidcScope: nil,
+            source: .authFile
+        )
+        XCTAssertFalse(creds.isExpired)
+
+        let home = scratch.appendingPathComponent("stale-expiry", isDirectory: true)
+        try writeAuth(
+            home: home,
+            token: token,
+            email: "beta@example.com",
+            userId: "beta",
+            expiresAt: Date(timeIntervalSince1970: 1_600_000_000)
+        )
+        let resolved = try GrokAuth.resolve(
+            pasted: nil,
+            useAmbientFile: false,
+            allowEnvironment: false,
+            grokHomePath: home.path(percentEncoded: false)
+        )
+        XCTAssertEqual(resolved.accessToken, token)
+        XCTAssertEqual(
+            GrokAccountIdentity.resolve(credentials: resolved).display,
+            "beta@example.com"
+        )
+    }
+
+    func testExpiredJWTIsExpiredEvenIfAuthDateIsFuture() {
+        let token = jwt(sub: "already-dead", exp: Date().addingTimeInterval(-120))
+        let creds = GrokAuth.Credentials(
+            accessToken: token,
+            email: nil,
+            userId: "dead",
+            expiresAt: Date().addingTimeInterval(3600),
+            authMode: "oidc",
+            teamId: nil,
+            oidcScope: nil,
+            source: .authFile
+        )
+        XCTAssertTrue(creds.isExpired)
     }
 
     func testSettingsTreeWalkNoLongerStealsANestedDecoyEmail() {
@@ -288,7 +372,7 @@ final class GrokAccountTests: XCTestCase {
         )
     }
 
-    private func jwt(sub: String, email: String? = nil, name: String? = nil) -> String {
+    private func jwt(sub: String, email: String? = nil, name: String? = nil, exp: Date? = nil) -> String {
         func encode(_ object: [String: Any]) -> String {
             let data = try! JSONSerialization.data(withJSONObject: object)
             return data.base64EncodedString()
@@ -303,10 +387,19 @@ final class GrokAccountTests: XCTestCase {
         if let name {
             payload["name"] = name
         }
+        if let exp {
+            payload["exp"] = exp.timeIntervalSince1970
+        }
         return "\(encode(["alg": "none", "typ": "JWT"])).\(encode(payload)).sig"
     }
 
-    private func writeAuth(home: URL, token: String, email: String?, userId: String? = nil) throws {
+    private func writeAuth(
+        home: URL,
+        token: String,
+        email: String?,
+        userId: String? = nil,
+        expiresAt: Date? = nil
+    ) throws {
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         var entry: [String: Any] = [
             "key": token,
@@ -317,6 +410,9 @@ final class GrokAccountTests: XCTestCase {
         }
         if let userId {
             entry["user_id"] = userId
+        }
+        if let expiresAt {
+            entry["expires_at"] = expiresAt.timeIntervalSince1970
         }
         let root = ["https://auth.x.ai::quota-test": entry]
         let data = try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])

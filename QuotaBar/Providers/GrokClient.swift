@@ -33,12 +33,12 @@ enum GrokClient {
         )
         var snapshot = try parse(
             object,
-            email: identity.cardIdentity,
+            email: identity.display,
             planFallback: plan,
             fetchedAt: now
         )
         if snapshot.accountEmail == nil {
-            snapshot.accountEmail = identity.cardIdentity
+            snapshot.accountEmail = identity.display
         }
         return snapshot
     }

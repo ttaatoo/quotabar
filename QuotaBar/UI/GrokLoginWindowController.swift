@@ -281,7 +281,7 @@ final class GrokLoginWindowController: NSWindowController, NSWindowDelegate {
                 return
             }
             let ambient = GrokAuth.isAmbientHome(home)
-            let identity = GrokAccountIdentity.resolve(credentials: credentials).cardIdentity
+            let identity = GrokAccountIdentity.resolve(credentials: credentials).display
             switch mode {
             case .addAccount:
                 let id = AppStore.shared.upsertGrokAccountFromHome(
