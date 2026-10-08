@@ -11,7 +11,8 @@ enum JSONNumber {
         case let value as String:
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
                 .replacingOccurrences(of: "%", with: "")
-            return Double(trimmed)
+            guard let parsed = Double(trimmed), parsed.isFinite else { return nil }
+            return parsed
         default:
             return nil
         }
@@ -196,7 +197,7 @@ enum AccountIdentity {
 
 enum Percent {
     static func remaining(used: Double) -> Double {
-        max(0, 100 - used)
+        clamp(100 - used)
     }
 
     static func clamp(_ value: Double) -> Double {

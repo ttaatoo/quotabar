@@ -14,7 +14,7 @@ final class FailureStateTests: XCTestCase {
         )
     }
 
-    func testAuthFailureLeavesReadyEvenWithCredentials() {
+    func testAuthFailureWithCredentialsBecomesFailure() {
         let previous = ProviderLoadState.ready(snapshot())
         let next = ProviderLoadState.afterFailure(
             previous: previous,
@@ -56,11 +56,17 @@ final class FailureStateTests: XCTestCase {
         let previous = ProviderLoadState.ready(snapshot())
         let next = ProviderLoadState.afterFailure(
             previous: previous,
-            error: QuotaError.network("Cancelled."),
+            error: QuotaError.cancelled,
             hasCredentials: true,
             signInHint: "sign in"
         )
         XCTAssertEqual(next, previous)
+        XCTAssertFalse(QuotaError.cancelled.shouldPreservePriorSnapshot)
+        let wrapped = RefreshWork.quotaError(URLError(.cancelled))
+        XCTAssertEqual(wrapped, .cancelled)
+        XCTAssertTrue(wrapped.isCancellation)
+        let described = RefreshWork.quotaError(URLError(.cancelled))
+        XCTAssertNotEqual(described, .network("cancelled"))
     }
 
     func testHTTP429DoesNotPreserveReady() {

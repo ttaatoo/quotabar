@@ -174,12 +174,17 @@ enum CodexCLIAuth {
         if next.accountId == nil { next.accountId = identity.accountId }
         if next.planName == nil { next.planName = identity.planName }
 
+        try persistRefreshedTokens(home: home, tokens: next)
+        return next
+    }
+
+    /// Writes a rotated token only when `home` is under QuotaBar's managed Codex directory.
+    /// Ambient `~/.codex` and any other path are left untouched.
+    static func persistRefreshedTokens(home: URL, tokens: Tokens) throws {
         persistLock.lock()
         defer { persistLock.unlock() }
-        if isManagedHome(home) {
-            try writeRefreshed(home: home, tokens: next)
-        }
-        return next
+        guard isManagedHome(home) else { return }
+        try writeRefreshed(home: home, tokens: tokens)
     }
 
     private static func refreshURL() -> URL {

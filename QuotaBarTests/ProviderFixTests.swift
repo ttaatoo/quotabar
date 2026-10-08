@@ -8,6 +8,10 @@ final class ProviderFixTests: XCTestCase {
         XCTAssertEqual(Percent.clamp(40), 40)
         XCTAssertEqual(Percent.clamp(.infinity), 0)
         XCTAssertEqual(Percent.clamp(.nan), 0)
+        XCTAssertEqual(Percent.remaining(used: -5), 100)
+        XCTAssertEqual(Percent.remaining(used: 40), 60)
+        XCTAssertNil(JSONNumber.double(from: "nan"))
+        XCTAssertNil(JSONNumber.double(from: "inf"))
     }
 
     func testGrokPeriodWithoutPercentIsNotZero() throws {
@@ -58,6 +62,40 @@ final class ProviderFixTests: XCTestCase {
         XCTAssertTrue(KeychainStore.isUUIDScoped("grok.oauth-token.AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"))
         XCTAssertFalse(KeychainStore.isUUIDScoped("cursor.cookie"))
         XCTAssertFalse(KeychainStore.isUUIDScoped("glm.api-key"))
+        XCTAssertFalse(KeychainStore.isUUIDScoped("chatgpt.cookie.not-a-uuid"))
+    }
+
+    func testCorruptConfigIsNotReconciledOrTreatedAsEmptyAccounts() {
+        XCTAssertEqual(ConfigStore.classify(data: nil), .missing)
+        XCTAssertEqual(ConfigStore.classify(data: Data()), .corrupt)
+        XCTAssertEqual(ConfigStore.classify(data: Data("{".utf8)), .corrupt)
+        XCTAssertEqual(ConfigStore.classify(data: Data("{}".utf8)), .decoded)
+        XCTAssertFalse(ConfigStore.shouldReconcileKeychain(.missing))
+        XCTAssertFalse(ConfigStore.shouldReconcileKeychain(.corrupt))
+        XCTAssertTrue(ConfigStore.shouldReconcileKeychain(.decoded))
+    }
+
+    func testCodexRefreshSkipsUnmanagedHome() throws {
+        let unmanaged = FileManager.default.temporaryDirectory
+            .appendingPathComponent("qb-unmanaged-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: unmanaged, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: unmanaged) }
+        let url = unmanaged.appendingPathComponent("auth.json")
+        let original = Data(#"{"tokens":{"access_token":"old"}}"#.utf8)
+        try original.write(to: url)
+        try CodexCLIAuth.persistRefreshedTokens(
+            home: unmanaged,
+            tokens: CodexCLIAuth.Tokens(accessToken: "new-token")
+        )
+        XCTAssertEqual(try Data(contentsOf: url), original)
+
+        let managed = CodexCLIAuth.makeManagedHomeURL()
+        defer { try? FileManager.default.removeItem(at: managed) }
+        try CodexCLIAuth.persistRefreshedTokens(
+            home: managed,
+            tokens: CodexCLIAuth.Tokens(accessToken: "managed-token")
+        )
+        XCTAssertEqual(CodexCLIAuth.read(home: managed)?.accessToken, "managed-token")
     }
 
     func testCodexWriteOnlyManagedHome() {
@@ -82,8 +120,9 @@ final class ProviderFixTests: XCTestCase {
             codexTokens: .init(
                 accessToken: "codex-token",
                 refreshToken: "refresh",
-                email: "codex@example.com",
-                accountId: "codex-acct"
+                idToken: nil,
+                accountId: "codex-acct",
+                email: "codex@example.com"
             )
         )
         XCTAssertEqual(mixed.token, "cookie-token")

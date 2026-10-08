@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(Security)
 import Security
+#endif
 
 enum KeychainAccount: Hashable {
     case cursorCookie
@@ -43,6 +45,7 @@ enum KeychainAccount: Hashable {
 enum KeychainStore {
     private static let service = "app.quotabar.QuotaBar"
 
+#if canImport(Security)
     static func set(_ value: String?, account: KeychainAccount) {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !trimmed.isEmpty else {
@@ -65,7 +68,7 @@ enum KeychainStore {
             query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
             let added = SecItemAdd(query as CFDictionary, nil)
             if added != errSecSuccess {
-                QuotaBarLog.keychain.error("Keychain add failed for \(account.rawValue, privacy: .public): \(added)")
+                QuotaBarLog.keychainError("Keychain add failed for \(account.rawValue): \(added)")
             }
             return
         }
@@ -74,7 +77,7 @@ enum KeychainStore {
         query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
         let added = SecItemAdd(query as CFDictionary, nil)
         if added != errSecSuccess {
-            QuotaBarLog.keychain.error("Keychain replace-add failed for \(account.rawValue, privacy: .public): \(added)")
+            QuotaBarLog.keychainError("Keychain replace-add failed for \(account.rawValue): \(added)")
         }
     }
 
@@ -143,18 +146,31 @@ enum KeychainStore {
         }
     }
 
-    static func isUUIDScoped(_ account: String) -> Bool {
-        account.hasPrefix("chatgpt.cookie.")
-            || account.hasPrefix("chatgpt.json.")
-            || account.hasPrefix("opencodeGo.apiKey.")
-            || account.hasPrefix("grok.oauth-token.")
-    }
-
     private static func baseQuery(_ account: KeychainAccount) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account.rawValue
         ]
+    }
+#else
+    static func set(_ value: String?, account: KeychainAccount) {}
+    static func get(_ account: KeychainAccount) -> String? { nil }
+    static func delete(_ account: KeychainAccount) {}
+    static func reconcile(chatgptIDs: [UUID], grokIDs: [UUID], opencodeIDs: [UUID]) {}
+#endif
+
+    static func isUUIDScoped(_ account: String) -> Bool {
+        let prefixes = [
+            "chatgpt.cookie.",
+            "chatgpt.json.",
+            "opencodeGo.apiKey.",
+            "grok.oauth-token."
+        ]
+        for prefix in prefixes where account.hasPrefix(prefix) {
+            let suffix = String(account.dropFirst(prefix.count))
+            return UUID(uuidString: suffix) != nil
+        }
+        return false
     }
 }

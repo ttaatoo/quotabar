@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Linux-runnable contracts for the audit fixes (B1–B31).
+"""Illustrative notes for the audit fixes. NOT proof.
 
-Mirrors Swift control flow in HTTPClassify, ProviderLoadState.afterFailure,
-ChatGPT identity, refresh coordinator, visibility, and provider parsers.
-Does not call live APIs.
+This script reimplements a simplified model of the Swift control flow.
+It does not compile or execute any .swift file. A green run here does not
+mean QuotaBar or QuotaBarTests build. The Swift tests under QuotaBarTests/
+and scripts/linux-foundation-tests.swift are the checks that exercise the
+real types.
 """
 
 from __future__ import annotations
@@ -124,8 +126,6 @@ def identities_match(lhs: str | None, rhs: str | None) -> bool:
         return value.strip()
 
     left, right = usable(lhs), usable(rhs)
-    if left is None and right is None:
-        return True
     if left is None or right is None:
         return False
     return left.lower() == right.lower()
@@ -261,7 +261,7 @@ def main() -> int:
     upsert_chatgpt_by_home(accounts, "same@example.com", "/home/b", "tok-b")
     assert len(accounts) == 2
     assert identities_match(None, "a@example.com") is False
-    assert identities_match(None, None) is True
+    assert identities_match(None, None) is False
     assert identities_match("a@example.com", "b@example.com") is False
 
     hidden = [{"id": "1", "enabled": False}, {"id": "2", "enabled": False}]
@@ -301,7 +301,7 @@ def main() -> int:
     assert needs_open_refresh("failure", 1, force=False) is True
     assert needs_open_refresh("ready", 1, force=True) is True
 
-    print("audit contracts passed")
+    print("illustrative audit model passed (not a Swift build)")
     return 0
 
 

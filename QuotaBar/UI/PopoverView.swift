@@ -465,7 +465,7 @@ struct AccountCard: View {
     private var signedOutRecoveryMessage: String {
         switch provider {
         case .chatgpt, .grok:
-            return "This account is still saved. Retry, or Re-login in Settings if the session expired."
+            return "This account is still saved. Use Re-login if the session expired."
         default:
             return "This account is still saved. Retry, or open Settings if the session expired."
         }

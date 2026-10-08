@@ -30,19 +30,17 @@ enum ChatGPTAccountIdentity {
             let lower = message.lowercased()
             if lower.contains("session cookie") { return true }
             if lower.contains("codex login expired") { return true }
-            if lower.contains("re-login") { return true }
             if lower.contains("token expired") { return true }
             if lower.contains("session expired") { return true }
             return false
         }
     }
 
-    /// Both sides must have a usable email. A missing email is not a match.
+    /// Both emails must be present and equal. A missing email is not a match.
     static func identitiesMatch(_ lhs: String?, _ rhs: String?) -> Bool {
-        let left = CodexCLIAuth.usableEmail(lhs)
-        let right = CodexCLIAuth.usableEmail(rhs)
-        if left == nil && right == nil { return true }
-        guard let left, let right else { return false }
+        guard let left = CodexCLIAuth.usableEmail(lhs),
+              let right = CodexCLIAuth.usableEmail(rhs)
+        else { return false }
         return left.caseInsensitiveCompare(right) == .orderedSame
     }
 
@@ -78,9 +76,9 @@ enum ChatGPTAccountIdentity {
            }) {
             return byHome
         }
-        guard let accessToken, !accessToken.isEmpty else { return nil }
+        guard let incomingToken = accessToken, !incomingToken.isEmpty else { return nil }
         return accounts.first { account in
-            account.id != id && accessToken(for: account) == accessToken
+            account.id != id && Self.accessToken(for: account) == incomingToken
         }
     }
 
@@ -114,12 +112,11 @@ enum ChatGPTAccountIdentity {
             let sameHome = representsHome(accounts[index], homePath: standardizedHome)
             let sameToken = accessToken.map { self.accessToken(for: accounts[index]) == $0 } ?? false
             if sameToken, !sameHome {
-                let previousHome = accounts[index].codexHomePath
+                // Point this row at the incoming home, but keep the previous
+                // directory. A copied auth.json can share an access token
+                // while the old managed home still holds the refresh token.
                 accounts[index].codexHomePath = standardizedHome
                 accounts[index].usesAmbientCodexHome = ambient
-                if !CodexCLIAuth.homesMatch(previousHome, standardizedHome) {
-                    CodexCLIAuth.removeManagedHomeIfSafe(previousHome)
-                }
             } else if sameHome {
                 accounts[index].usesAmbientCodexHome = ambient
                 if accounts[index].codexHomePath == nil {

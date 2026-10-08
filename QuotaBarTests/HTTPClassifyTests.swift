@@ -53,10 +53,31 @@ final class HTTPClassifyTests: XCTestCase {
         XCTAssertEqual(
             HTTPClassify.classify(
                 status: 403,
-                data: Data(#"{"error":"forbidden","message":"token expired"}"#.utf8),
+                data: Data(#"{"code":"token_expired"}"#.utf8),
                 contentType: "application/json"
             ),
             .unauthorized
+        )
+    }
+
+    func testPermission403IsNotAuthAndJSONCloudflareIsNotCheckpoint() {
+        let sku = Data(#"{"error":"forbidden","message":"user unauthorized for this SKU"}"#.utf8)
+        XCTAssertEqual(
+            HTTPClassify.classify(status: 403, data: sku, contentType: "application/json"),
+            .failure
+        )
+        let mentioned = Data(#"{"error":"forbidden","note":"cloudflare attention required"}"#.utf8)
+        XCTAssertEqual(
+            HTTPClassify.classify(status: 403, data: mentioned, contentType: "application/json"),
+            .failure
+        )
+        XCTAssertEqual(
+            HTTPClassify.classify(
+                status: 200,
+                data: Data(#"{"message":"unauthorized"}"#.utf8),
+                contentType: "application/json"
+            ),
+            .ok
         )
     }
 

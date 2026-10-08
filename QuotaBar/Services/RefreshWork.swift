@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Isolation-safe refresh helpers.
 ///
@@ -90,10 +93,16 @@ enum RefreshWork {
         if let quota = error as? QuotaError {
             return quota
         }
-        if error is CancellationError {
-            return .network("Cancelled.")
+        if isRequestCancellation(error) {
+            return .cancelled
         }
         return .network(error.localizedDescription)
+    }
+
+    static func isRequestCancellation(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        if let urlError = error as? URLError, urlError.code == .cancelled { return true }
+        return false
     }
 
     static func performChatGPT(

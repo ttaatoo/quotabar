@@ -27,14 +27,6 @@ enum CursorAppLauncher {
                 return url
             }
         }
-        for app in workspace.runningApplications {
-            guard let identifier = app.bundleIdentifier?.lowercased(),
-                  identifier.contains("cursor"),
-                  !identifier.contains("quotabar"),
-                  let url = app.bundleURL
-            else { continue }
-            return url
-        }
         let homeApps = fileManager.homeDirectoryForCurrentUser
             .appendingPathComponent("Applications/Cursor.app")
         let candidates = [

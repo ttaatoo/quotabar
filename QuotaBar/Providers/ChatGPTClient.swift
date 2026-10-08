@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 enum ChatGPTClient {
     private static let sessionCookieName = "__Secure-next-auth.session-token"

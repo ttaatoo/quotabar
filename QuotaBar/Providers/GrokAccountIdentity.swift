@@ -142,12 +142,8 @@ enum GrokAccountIdentity {
             let sameHome = representsHome(accounts[index], homePath: standardizedHome)
             let sameToken = accessToken.map { GrokAuth.accessToken(for: accounts[index]) == $0 } ?? false
             if sameToken, !sameHome {
-                let previousHome = accounts[index].grokHomePath
                 accounts[index].grokHomePath = standardizedHome
                 accounts[index].usesAmbientAuthFile = ambient
-                if !GrokAuth.homesMatch(previousHome, standardizedHome) {
-                    GrokAuth.removeManagedHomeIfSafe(previousHome)
-                }
             } else if sameHome {
                 accounts[index].usesAmbientAuthFile = ambient
                 if accounts[index].grokHomePath == nil {

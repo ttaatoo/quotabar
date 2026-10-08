@@ -55,6 +55,56 @@ final class RefreshCoordinator: @unchecked Sendable {
         return true
     }
 
+    enum PollObservation: Equatable {
+        case success
+        case transportFailure
+        case ignored
+    }
+
+    /// Credentialed transport failures back off. A credentialed success resets.
+    /// Signed-out, disabled, auth, and unconfigured rows are `.ignored` and do not
+    /// raise the interval. No credentialed success or transport failure clears any
+    /// penalty so a normal install does not drift to 30 minutes.
+    static func nextPollFailureCount(current: Int, observations: [PollObservation]) -> Int {
+        if observations.contains(.success) { return 0 }
+        if observations.contains(.transportFailure) {
+            return min(max(current, 0) + 1, 5)
+        }
+        return 0
+    }
+
+    static func observation(hasCredentials: Bool, state: ProviderLoadState) -> PollObservation {
+        guard hasCredentials else { return .ignored }
+        switch state {
+        case .ready:
+            return .success
+        case .stale:
+            return .transportFailure
+        case .failure(let message):
+            return isTransportFailureMessage(message) ? .transportFailure : .ignored
+        case .signedOut, .idle, .loading:
+            return .ignored
+        }
+    }
+
+    static func isTransportFailureMessage(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        if lower.contains("timed out") { return true }
+        if lower.contains("security checkpoint") { return true }
+        if lower.contains("offline") { return true }
+        if lower.contains("network connection") { return true }
+        if lower.contains("internet connection") { return true }
+        if lower.contains("could not connect") { return true }
+        if lower.contains("hostname could not be found") { return true }
+        if lower.contains("not connected to the internet") { return true }
+        return false
+    }
+
+    /// Saved accounts that are all disabled must not be replaced by a fake signed-out card.
+    static func showsSyntheticSignedOutCard(savedAccountCount: Int, visibleAccountCount: Int) -> Bool {
+        visibleAccountCount == 0 && savedAccountCount == 0
+    }
+
     /// Exponential backoff from the configured interval, capped at 30 minutes.
     static func pollDelay(base: TimeInterval, consecutiveFailures: Int) -> TimeInterval {
         let safeBase = max(base, 15)

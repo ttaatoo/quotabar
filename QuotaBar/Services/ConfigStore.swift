@@ -1,16 +1,47 @@
 import Foundation
 
+enum ConfigLoadKind: Equatable {
+    case missing
+    case decoded
+    case corrupt
+}
+
+struct ConfigLoad {
+    var settings: AppSettings
+    var kind: ConfigLoadKind
+}
+
 enum ConfigStore {
     static var configURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config/quotabar/config.json")
     }
 
-    static func load() -> AppSettings {
+    /// Orphan Keychain cleanup is safe only after a real decode. A missing file
+    /// and a corrupt file both lack a trustworthy account list.
+    static func shouldReconcileKeychain(_ kind: ConfigLoadKind) -> Bool {
+        kind == .decoded
+    }
+
+    static func classify(data: Data?) -> ConfigLoadKind {
+        guard let data else { return .missing }
+        guard !data.isEmpty else { return .corrupt }
+        return (try? JSONDecoder().decode(ConfigFile.self, from: data)) == nil ? .corrupt : .decoded
+    }
+
+    static func load() -> ConfigLoad {
+        let data = try? Data(contentsOf: configURL)
+        let kind = classify(data: data)
+        if kind == .corrupt {
+            QuotaBarLog.configError("config.json is present but could not be decoded. Leaving the file and Keychain secrets unchanged.")
+            return ConfigLoad(settings: .default, kind: .corrupt)
+        }
+
         var settings = AppSettings.default
         var shouldRewrite = false
         var hadGrokAccountsKey = false
-        if let data = try? Data(contentsOf: configURL),
+        if kind == .decoded,
+           let data,
            let file = try? JSONDecoder().decode(ConfigFile.self, from: data) {
             settings = file.settings
             migrateSecrets(from: file)
@@ -43,7 +74,7 @@ enum ConfigStore {
         if grokAccountsSupersedeLegacyToken(settings) {
             KeychainStore.delete(.grokOAuthToken)
         }
-        return settings
+        return ConfigLoad(settings: settings, kind: kind)
     }
 
     static func save(_ settings: AppSettings) throws {

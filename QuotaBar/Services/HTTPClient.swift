@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 enum HTTPClient {
     static let browserUserAgent =
@@ -20,7 +23,9 @@ enum HTTPClient {
         config.httpCookieAcceptPolicy = .never
         config.urlCache = nil
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        #if os(macOS) || os(iOS)
         config.waitsForConnectivity = false
+        #endif
         config.timeoutIntervalForRequest = RefreshWork.httpTimeout
         config.timeoutIntervalForResource = RefreshWork.providerTimeout
         let delegate = RedirectDelegate(followRedirects: followRedirects)
@@ -116,10 +121,8 @@ enum HTTPClient {
                 throw QuotaError.network("Unexpected response from \(url.host ?? url.absoluteString).")
             }
             return (raw.data, http)
-        } catch let error as QuotaError {
-            throw error
         } catch {
-            throw QuotaError.network(error.localizedDescription)
+            throw RefreshWork.quotaError(error)
         }
     }
 

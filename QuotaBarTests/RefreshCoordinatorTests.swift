@@ -47,6 +47,52 @@ final class RefreshCoordinatorTests: XCTestCase {
         )
     }
 
+    func testPollBackoffIgnoresSignedOutWhenAnotherAccountSucceeds() {
+        let observations: [RefreshCoordinator.PollObservation] = [
+            .ignored,
+            .success,
+            .transportFailure
+        ]
+        XCTAssertEqual(RefreshCoordinator.nextPollFailureCount(current: 4, observations: observations), 0)
+        XCTAssertEqual(
+            RefreshCoordinator.nextPollFailureCount(current: 1, observations: [.transportFailure, .ignored]),
+            2
+        )
+        XCTAssertEqual(
+            RefreshCoordinator.nextPollFailureCount(current: 3, observations: [.ignored, .ignored]),
+            0
+        )
+        XCTAssertEqual(
+            RefreshCoordinator.observation(hasCredentials: false, state: .signedOut("sign in")),
+            .ignored
+        )
+        XCTAssertEqual(
+            RefreshCoordinator.observation(hasCredentials: true, state: .stale(snapshot(), message: "Timed out after 30s.")),
+            .transportFailure
+        )
+        XCTAssertEqual(
+            RefreshCoordinator.observation(hasCredentials: true, state: .failure("session expired")),
+            .ignored
+        )
+        XCTAssertFalse(
+            RefreshCoordinator.showsSyntheticSignedOutCard(savedAccountCount: 2, visibleAccountCount: 0)
+        )
+        XCTAssertTrue(
+            RefreshCoordinator.showsSyntheticSignedOutCard(savedAccountCount: 0, visibleAccountCount: 0)
+        )
+    }
+
+    private func snapshot() -> UsageSnapshot {
+        UsageSnapshot(
+            provider: .chatgpt,
+            planName: "Plus",
+            fetchedAt: Date(),
+            session: nil,
+            weekly: UsageWindow(title: "Weekly", remainingPercent: 40, usedPercent: 60),
+            source: .live
+        )
+    }
+
     func testBackoffGrowsThenCaps() {
         XCTAssertEqual(RefreshCoordinator.pollDelay(base: 120, consecutiveFailures: 0), 120)
         XCTAssertEqual(RefreshCoordinator.pollDelay(base: 120, consecutiveFailures: 1), 240)

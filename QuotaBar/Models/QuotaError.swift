@@ -7,6 +7,8 @@ enum QuotaError: LocalizedError, Equatable, Sendable {
     case schema(String)
     case network(String)
     case noUsableQuota(String)
+    /// Overlapped refresh or URLSession cancellation. Not a timeout and not a user-facing failure.
+    case cancelled
 
     var errorDescription: String? {
         switch self {
@@ -18,6 +20,8 @@ enum QuotaError: LocalizedError, Equatable, Sendable {
             return message
         case .http(let code, let message):
             return "HTTP \(code): \(message)"
+        case .cancelled:
+            return "Cancelled."
         }
     }
 
@@ -33,19 +37,13 @@ enum QuotaError: LocalizedError, Equatable, Sendable {
     }
 
     var isCancellation: Bool {
-        if case .network(let message) = self {
-            return message == "Cancelled."
-        }
+        if case .cancelled = self { return true }
         return false
     }
 
-    /// Keep last meters only for transport / checkpoint failures — never auth, schema, or HTTP 4xx/5xx.
+    /// Keep last meters only for transport / checkpoint failures — never auth, schema, HTTP, or cancellation.
     var shouldPreservePriorSnapshot: Bool {
-        switch self {
-        case .network(let message):
-            return message != "Cancelled."
-        default:
-            return false
-        }
+        if case .network = self { return true }
+        return false
     }
 }

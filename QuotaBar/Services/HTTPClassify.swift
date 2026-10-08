@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Shared HTTP status classification. 403 is not automatically an auth failure:
 /// Vercel / HTML / Cloudflare checkpoints are network; JSON unauthenticated
@@ -16,17 +19,21 @@ enum HTTPClassify {
         "Usage is temporarily blocked by a security checkpoint. Try Refresh again."
 
     static func classify(status: Int, data: Data, contentType: String?) -> Kind {
+        if (200...299).contains(status) {
+            // Cursor's api2 can return 200 with an exact not_authenticated / shouldLogout body.
+            if isExactAuthJSON(data: data, contentType: contentType) {
+                return .unauthorized
+            }
+            return .ok
+        }
         if isCheckpoint(status: status, data: data, contentType: contentType) {
             return .checkpoint
         }
-        if isUnauthenticated(status: status, data: data, contentType: contentType) {
+        if status == 401 || (status == 403 && isExactAuthJSON(data: data, contentType: contentType)) {
             return .unauthorized
         }
         if status == 429 {
             return .rateLimited
-        }
-        if (200...299).contains(status) {
-            return .ok
         }
         return .failure
     }
@@ -52,57 +59,65 @@ enum HTTPClassify {
 
     static func isCheckpoint(status: Int, data: Data, contentType: String?) -> Bool {
         guard status == 403 else { return false }
+        if isJSONPayload(data, contentType: contentType) { return false }
         if isVercelCheckpoint(data: data) { return true }
         let type = (contentType ?? "").lowercased()
         if type.contains("text/html") { return true }
-        return looksLikeHTML(data) && !looksLikeJSON(data)
+        return looksLikeHTML(data)
     }
 
     static func isVercelCheckpoint(data: Data) -> Bool {
         let text = String(data: data.prefix(4000), encoding: .utf8)?.lowercased() ?? ""
         return text.contains("vercel security checkpoint")
             || text.contains("security checkpoint")
-            || text.contains("attention required")
             || text.contains("cf-error")
-            || text.contains("cloudflare")
     }
 
     static func isUnauthenticated(status: Int, data: Data, contentType: String?) -> Bool {
-        if isCheckpoint(status: status, data: data, contentType: contentType) {
-            return false
+        if (200...299).contains(status) || status == 403 {
+            return isExactAuthJSON(data: data, contentType: contentType)
         }
         if status == 401 {
             return true
         }
-        if looksLikeJSON(data) || (contentType ?? "").lowercased().contains("json") {
-            if let object = try? JSONWalk.object(from: data), isUnauthenticatedJSON(object) {
-                return true
-            }
+        return false
+    }
+
+    /// `error` / `code` must equal a known auth marker. Message substrings such as
+    /// "user unauthorized for this SKU" stay ordinary HTTP failures.
+    static func isUnauthenticatedJSON(_ object: [String: Any]) -> Bool {
+        if object["shouldLogout"] as? Bool == true {
+            return true
+        }
+        let markers: Set<String> = [
+            "not_authenticated",
+            "unauthenticated",
+            "unauthorized",
+            "invalid_token",
+            "invalid_grant",
+            "token_expired"
+        ]
+        for key in ["error", "code"] {
+            guard let raw = object[key] as? String else { continue }
+            let normalized = raw
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+                .replacingOccurrences(of: "-", with: "_")
+                .replacingOccurrences(of: " ", with: "_")
+            if markers.contains(normalized) { return true }
         }
         return false
     }
 
-    static func isUnauthenticatedJSON(_ object: [String: Any]) -> Bool {
-        if object["error"] as? String == "not_authenticated" {
-            return true
-        }
-        if object["shouldLogout"] as? Bool == true {
-            return true
-        }
-        let haystack = ["error", "code", "message"]
-            .compactMap { object[$0] as? String }
-            .joined(separator: " ")
-            .lowercased()
-        let markers = [
-            "not_authenticated",
-            "not authenticated",
-            "unauthenticated",
-            "unauthorized",
-            "invalid token",
-            "token expired",
-            "invalid_grant"
-        ]
-        return markers.contains { haystack.contains($0) }
+    static func isExactAuthJSON(data: Data, contentType: String?) -> Bool {
+        guard isJSONPayload(data, contentType: contentType),
+              let object = try? JSONWalk.object(from: data)
+        else { return false }
+        return isUnauthenticatedJSON(object)
+    }
+
+    static func isJSONPayload(_ data: Data, contentType: String?) -> Bool {
+        looksLikeJSON(data) || (contentType ?? "").lowercased().contains("json")
     }
 
     static func looksLikeJSON(_ data: Data) -> Bool {
