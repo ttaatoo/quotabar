@@ -12,9 +12,12 @@ final class AppStore: ObservableObject {
     @Published var grokStates: [UUID: ProviderLoadState] = [:]
     @Published var now: Date = Date()
     @Published var isRefreshing = false
+    @Published var lastFetchAttempts: [FetchAttempt] = []
+    @Published var lastConfigSaveError: String?
     private let refreshCoordinator = RefreshCoordinator()
     private var consecutivePollFailures = 0
     private var lastScheduledPollAt: Date?
+    private var refreshStartedAt: [String: Date] = [:]
 
     @Published var cursorCookie: String = ""
     @Published var chatgptCookies: [UUID: String] = [:]
@@ -246,8 +249,21 @@ final class AppStore: ObservableObject {
                         card: card,
                         hint: overallHint(provider: provider, card: card)
                     )
+                }.sorted { lhs, rhs in
+                    overallPriority(lhs.card.state) < overallPriority(rhs.card.state)
                 }
             )
+        }
+    }
+
+    private func overallPriority(_ state: ProviderLoadState) -> Int {
+        switch state {
+        case .failure: return 0
+        case .signedOut: return 1
+        case .stale: return 2
+        case .loading: return 3
+        case .idle: return 4
+        case .ready: return 5
         }
     }
 
@@ -449,6 +465,20 @@ final class AppStore: ObservableObject {
         }
     }
 
+    private func markRefreshKeyStarted(_ key: String) {
+        refreshStartedAt[key] = Date()
+    }
+
+    private func startedAt(for key: String) -> Date {
+        refreshStartedAt[key] ?? Date()
+    }
+
+    @discardableResult
+    private func beginRefresh(_ key: String) -> Int {
+        markRefreshKeyStarted(key)
+        return refreshCoordinator.begin(key)
+    }
+
     func updateSettings(_ mutate: (inout AppSettings) -> Void) {
         let previousInterval = settings.pollIntervalSeconds
         mutate(&settings)
@@ -546,7 +576,61 @@ final class AppStore: ObservableObject {
 
     func persistSettings() {
         settings.sanitize()
-        ConfigStore.save(settings)
+        do {
+            try ConfigStore.save(settings)
+            lastConfigSaveError = nil
+        } catch {
+            lastConfigSaveError = error.localizedDescription
+            QuotaBarLog.config.error("Failed to save settings: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    func recordFetchAttempt(
+        provider: ProviderKind,
+        accountLabel: String,
+        state: ProviderLoadState,
+        startedAt: Date
+    ) {
+        let kind: String
+        let message: String
+        var preservedStale = false
+        switch state {
+        case .ready:
+            kind = "ok"
+            message = "ok"
+        case .stale(_, let staleMessage):
+            kind = "stale"
+            message = staleMessage
+            preservedStale = true
+        case .failure(let text):
+            kind = "failure"
+            message = text
+        case .signedOut(let text):
+            kind = "signedOut"
+            message = text
+        case .loading:
+            kind = "loading"
+            message = "loading"
+        case .idle:
+            kind = "idle"
+            message = "idle"
+        }
+        let attempt = FetchAttempt(
+            id: "\(provider.rawValue):\(accountLabel)",
+            provider: provider,
+            accountLabel: accountLabel,
+            finishedAt: Date(),
+            kind: kind,
+            message: message,
+            durationMs: Int(Date().timeIntervalSince(startedAt) * 1000),
+            preservedStale: preservedStale
+        )
+        lastFetchAttempts.removeAll { $0.id == attempt.id }
+        lastFetchAttempts.insert(attempt, at: 0)
+        if lastFetchAttempts.count > 24 {
+            lastFetchAttempts = Array(lastFetchAttempts.prefix(24))
+        }
+        QuotaBarLog.refresh.info("\(attempt.summary, privacy: .public)")
     }
 
     func setAllowImplicitChatGPT(_ enabled: Bool) {
@@ -757,7 +841,7 @@ final class AppStore: ObservableObject {
 
     func refreshSelected(force: Bool = true) async {
         let key = "ui:selected"
-        let generation = refreshCoordinator.begin(key)
+        let generation = beginRefresh(key)
         syncRefreshingFlag()
         defer {
             refreshCoordinator.finish(key, generation: generation)
@@ -847,7 +931,7 @@ final class AppStore: ObservableObject {
 
     func refreshAll() async {
         let key = "ui:all"
-        let generation = refreshCoordinator.begin(key)
+        let generation = beginRefresh(key)
         syncRefreshingFlag()
         defer {
             refreshCoordinator.finish(key, generation: generation)
@@ -1008,7 +1092,7 @@ final class AppStore: ObservableObject {
             return
         }
         let key = RefreshCoordinator.key(provider)
-        let generation = refreshCoordinator.begin(key)
+        let generation = beginRefresh(key)
         syncRefreshingFlag()
         defer {
             refreshCoordinator.finish(key, generation: generation)
@@ -1043,6 +1127,12 @@ final class AppStore: ObservableObject {
                 )
             }
         }
+        recordFetchAttempt(
+            provider: provider,
+            accountLabel: provider.title,
+            state: states[provider] ?? .idle,
+            startedAt: startedAt(for: key)
+        )
     }
 
     private func refreshAllChatGPTAccounts(userInitiated: Bool, force: Bool = true) async {
@@ -1065,7 +1155,7 @@ final class AppStore: ObservableObject {
                 continue
             }
             let key = RefreshCoordinator.key(.chatgpt, accountID: account.id)
-            generations[account.id] = refreshCoordinator.begin(key)
+            generations[account.id] = beginRefresh(key)
             if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
                 chatgptStates[account.id] = .loading
             }
@@ -1103,7 +1193,7 @@ final class AppStore: ObservableObject {
         guard settings.chatgptAccounts.contains(where: { $0.id == id }) else { return }
         let current = chatgptStates[id] ?? .idle
         let key = RefreshCoordinator.key(.chatgpt, accountID: id)
-        let generation = refreshCoordinator.begin(key)
+        let generation = beginRefresh(key)
         syncRefreshingFlag()
         defer {
             refreshCoordinator.finish(key, generation: generation)
@@ -1147,13 +1237,21 @@ final class AppStore: ObservableObject {
                 signInHint: ProviderKind.chatgpt.signInHint
             )
         }
+        let label = settings.chatgptAccounts.first(where: { $0.id == item.id })?.displayTitle
+            ?? item.id.uuidString
+        recordFetchAttempt(
+            provider: .chatgpt,
+            accountLabel: label,
+            state: chatgptStates[item.id] ?? .idle,
+            startedAt: startedAt(for: key)
+        )
     }
 
     /// Uses ~/.codex/auth.json when no ChatGPT account has been added yet.
     /// Does not persist a new account on each launch.
     private func refreshImplicitChatGPT(userInitiated: Bool) async {
         let key = RefreshCoordinator.key(.chatgpt, accountID: Self.implicitChatGPTID)
-        let generation = refreshCoordinator.begin(key)
+        let generation = beginRefresh(key)
         syncRefreshingFlag()
         defer {
             refreshCoordinator.finish(key, generation: generation)
@@ -1178,6 +1276,12 @@ final class AppStore: ObservableObject {
         )
         guard refreshCoordinator.isCurrent(key, generation: generation) else { return }
         applyImplicitChatGPT(current, item)
+        recordFetchAttempt(
+            provider: .chatgpt,
+            accountLabel: "implicit",
+            state: states[.chatgpt] ?? .idle,
+            startedAt: startedAt(for: key)
+        )
     }
 
     private func refreshChatGPTPreviewFallback(userInitiated _: Bool) async {
@@ -1542,7 +1646,7 @@ extension AppStore {
                 continue
             }
             let key = RefreshCoordinator.key(.opencodeGo, accountID: account.id)
-            generations[account.id] = refreshCoordinator.begin(key)
+            generations[account.id] = beginRefresh(key)
             if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
                 opencodeGoStates[account.id] = .loading
             }
@@ -1576,7 +1680,7 @@ extension AppStore {
         guard settings.opencodeGoAccounts.contains(where: { $0.id == id }) else { return }
         let current = opencodeGoStates[id] ?? .idle
         let key = RefreshCoordinator.key(.opencodeGo, accountID: id)
-        let generation = refreshCoordinator.begin(key)
+        let generation = beginRefresh(key)
         syncRefreshingFlag()
         defer {
             refreshCoordinator.finish(key, generation: generation)
@@ -1613,6 +1717,14 @@ extension AppStore {
                 signInHint: ProviderKind.opencodeGo.signInHint
             )
         }
+        let label = settings.opencodeGoAccounts.first(where: { $0.id == item.id })?.displayTitle
+            ?? item.id.uuidString
+        recordFetchAttempt(
+            provider: .opencodeGo,
+            accountLabel: label,
+            state: opencodeGoStates[item.id] ?? .idle,
+            startedAt: startedAt(for: key)
+        )
     }
 
     fileprivate func refreshImplicitOpenCodeGo(userInitiated: Bool) async {
@@ -1971,7 +2083,7 @@ extension AppStore {
                 continue
             }
             let key = RefreshCoordinator.key(.grok, accountID: account.id)
-            generations[account.id] = refreshCoordinator.begin(key)
+            generations[account.id] = beginRefresh(key)
             if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
                 grokStates[account.id] = .loading
             }
@@ -1996,7 +2108,7 @@ extension AppStore {
         guard let account = settings.grokAccounts.first(where: { $0.id == id }) else { return }
         let current = grokStates[id] ?? .idle
         let key = RefreshCoordinator.key(.grok, accountID: id)
-        let generation = refreshCoordinator.begin(key)
+        let generation = beginRefresh(key)
         syncRefreshingFlag()
         defer {
             refreshCoordinator.finish(key, generation: generation)
@@ -2042,6 +2154,12 @@ extension AppStore {
                 signInHint: ProviderKind.grok.signInHint
             )
         }
+        recordFetchAttempt(
+            provider: .grok,
+            accountLabel: grokDisplayTitle(for: item.id) ?? item.id.uuidString,
+            state: grokStates[item.id] ?? .idle,
+            startedAt: startedAt(for: key)
+        )
     }
 
     fileprivate func refreshImplicitGrok(userInitiated: Bool) async {

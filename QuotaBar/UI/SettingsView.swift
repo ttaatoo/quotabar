@@ -30,6 +30,17 @@ struct SettingsView: View {
         }
         .background(Theme.settingsPageFill)
         .frame(minWidth: Theme.settingsMinWidth, minHeight: Theme.settingsMinHeight)
+        .overlay(alignment: .top) {
+            if let error = store.lastConfigSaveError, !error.isEmpty {
+                Text("Couldn’t save settings: \(error)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.warning)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.warning.opacity(0.12))
+            }
+        }
         .preferredColorScheme(.dark)
         .onAppear {
             if !didUnlockSection {
@@ -163,6 +174,8 @@ struct SettingsView: View {
             grokPane
         case .display:
             displayPane
+        case .diagnostics:
+            diagnosticsPane
         case .about:
             aboutPane
         }
@@ -524,6 +537,47 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    private var diagnosticsPane: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            SettingsPaneHeader(
+                title: SettingsSection.diagnostics.paneTitle,
+                subtitle: "Last fetch for each account. No secrets — kind, age, and whether meters were kept."
+            )
+            if store.lastFetchAttempts.isEmpty {
+                SettingsGroup {
+                    SettingsCaption(text: "Refresh once to populate this list. Preview fixtures also record attempts.")
+                        .padding(12)
+                }
+            } else {
+                SettingsGroup {
+                    ForEach(Array(store.lastFetchAttempts.enumerated()), id: \.element.id) { index, attempt in
+                        if index > 0 {
+                            SettingsInsetHairline()
+                        }
+                        SettingsRow(
+                            title: attempt.summary,
+                            subtitle: diagnosticsSubtitle(attempt)
+                        ) {
+                            EmptyView()
+                        }
+                    }
+                }
+            }
+            if let error = store.lastConfigSaveError, !error.isEmpty {
+                SettingsCaption(text: "Last settings save failed: \(error)", tone: .warning)
+            }
+        }
+    }
+
+    private func diagnosticsSubtitle(_ attempt: FetchAttempt) -> String {
+        let age = TimeFormatting.relativeUpdated(from: attempt.finishedAt, now: store.now)
+        var parts = [age, "\(attempt.durationMs) ms"]
+        if !attempt.message.isEmpty, attempt.kind != "ok" {
+            parts.append(attempt.message)
+        }
+        return parts.joined(separator: " · ")
     }
 
     private var aboutPane: some View {

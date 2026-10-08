@@ -28,7 +28,7 @@ enum ConfigStore {
         let beforeSanitize = settings
         settings.sanitize()
         if shouldRewrite || settings != beforeSanitize {
-            save(settings)
+            try? save(settings)
         }
         if configFileHasChatGPTAccounts() {
             let superseded = settings.chatgptAccounts.contains { account in
@@ -46,24 +46,20 @@ enum ConfigStore {
         return settings
     }
 
-    static func save(_ settings: AppSettings) {
+    static func save(_ settings: AppSettings) throws {
         var cleaned = settings
         cleaned.sanitize()
         let file = ConfigFile(settings: cleaned)
         let directory = configURL.deletingLastPathComponent()
-        do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(file)
-            try data.write(to: configURL, options: [.atomic])
-            try FileManager.default.setAttributes(
-                [.posixPermissions: 0o600],
-                ofItemAtPath: configURL.path
-            )
-        } catch {
-            // Settings still live in memory / Keychain; a config write failure is not fatal.
-        }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(file)
+        try data.write(to: configURL, options: [.atomic])
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: configURL.path
+        )
     }
 
     static func readLegacyGLMKey() -> String? {
