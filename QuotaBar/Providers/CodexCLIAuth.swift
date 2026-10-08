@@ -45,6 +45,18 @@ enum CodexCLIAuth {
         standardizedPath(url) == standardizedPath(defaultHomeURL())
     }
 
+    static func isAmbientHomePath(_ path: String?) -> Bool {
+        guard let url = homeURL(path: path) else { return false }
+        return isAmbientHome(url)
+    }
+
+    static func homesMatch(_ lhs: String?, _ rhs: String?) -> Bool {
+        guard let left = homeURL(path: lhs), let right = homeURL(path: rhs) else {
+            return false
+        }
+        return standardizedPath(left) == standardizedPath(right)
+    }
+
     static func read(home: URL? = nil) -> Tokens? {
         let homeURL = home ?? defaultHomeURL()
         let url = authFileURL(home: homeURL)

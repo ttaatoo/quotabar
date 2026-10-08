@@ -78,4 +78,24 @@ final class FailureStateTests: XCTestCase {
         XCTAssertEqual(GrokAccountIdentity.Recovery.action(for: stale), .relogin)
         XCTAssertTrue(stale.showsUserInitiatedLoading)
     }
+
+    func testChatGPTExpiredFailureOffersRelogin() {
+        let failure = ProviderLoadState.failure("chatgpt.com rejected the session cookie.")
+        XCTAssertEqual(ChatGPTAccountIdentity.Recovery.action(for: failure), .relogin)
+        XCTAssertTrue(failure.showsUserInitiatedLoading)
+        XCTAssertTrue(AccountCardRow(
+            id: "x",
+            email: "a@b.com",
+            fallbackTitle: "ChatGPT",
+            state: failure,
+            hasCredentials: true,
+            recoveryTitle: ChatGPTAccountIdentity.Recovery.action(for: failure).buttonTitle
+        ).showsRecoveryAction)
+    }
+
+    func testNetworkFailureKeepsRetry() {
+        let stale = ProviderLoadState.stale(snapshot(), message: "Timed out after 30s.")
+        XCTAssertEqual(ChatGPTAccountIdentity.Recovery.action(for: stale), .retryRefresh)
+        XCTAssertEqual(GrokAccountIdentity.Recovery.action(for: stale), .retryRefresh)
+    }
 }

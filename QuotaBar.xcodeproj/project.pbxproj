@@ -31,6 +31,7 @@
 		000000000000000000000091 /* GrokAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000090 /* GrokAuth.swift */; };
 		000000000000000000000093 /* GrokClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000092 /* GrokClient.swift */; };
 		000000000000000000000161 /* GrokAccountIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000160 /* GrokAccountIdentity.swift */; };
+		000000000000000000000175 /* ChatGPTAccountIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000174 /* ChatGPTAccountIdentity.swift */; };
 		0000000000000000000000F1 /* GrokCLILocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000F0 /* GrokCLILocator.swift */; };
 		0000000000000000000000F3 /* GrokLoginWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000F2 /* GrokLoginWindowController.swift */; };
 		0000000000000000000000B1 /* OpenCodeGoClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000B0 /* OpenCodeGoClient.swift */; };
@@ -88,6 +89,7 @@
 		000000000000000000000090 /* GrokAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokAuth.swift; sourceTree = "<group>"; };
 		000000000000000000000092 /* GrokClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokClient.swift; sourceTree = "<group>"; };
 		000000000000000000000160 /* GrokAccountIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokAccountIdentity.swift; sourceTree = "<group>"; };
+		000000000000000000000174 /* ChatGPTAccountIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTAccountIdentity.swift; sourceTree = "<group>"; };
 		0000000000000000000000F0 /* GrokCLILocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokCLILocator.swift; sourceTree = "<group>"; };
 		0000000000000000000000F2 /* GrokLoginWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokLoginWindowController.swift; sourceTree = "<group>"; };
 		0000000000000000000000B0 /* OpenCodeGoClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGoClient.swift; sourceTree = "<group>"; };
@@ -209,6 +211,7 @@
 				000000000000000000000021 /* GLMClient.swift */,
 				000000000000000000000090 /* GrokAuth.swift */,
 				000000000000000000000160 /* GrokAccountIdentity.swift */,
+				000000000000000000000174 /* ChatGPTAccountIdentity.swift */,
 				0000000000000000000000F0 /* GrokCLILocator.swift */,
 				000000000000000000000092 /* GrokClient.swift */,
 				0000000000000000000000B0 /* OpenCodeGoClient.swift */,
@@ -416,6 +419,7 @@
 				000000000000000000000081 /* CodexCLIAuth.swift in Sources */,
 				000000000000000000000083 /* CodexCLILocator.swift in Sources */,
 				000000000000000000000020 /* ChatGPTClient.swift in Sources */,
+				000000000000000000000175 /* ChatGPTAccountIdentity.swift in Sources */,
 				000000000000000000000022 /* GLMClient.swift in Sources */,
 				000000000000000000000091 /* GrokAuth.swift in Sources */,
 				000000000000000000000161 /* GrokAccountIdentity.swift in Sources */,

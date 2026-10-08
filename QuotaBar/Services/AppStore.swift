@@ -146,7 +146,8 @@ final class AppStore: ObservableObject {
                     email: row.account?.email ?? row.state.snapshot?.accountEmail,
                     fallbackTitle: row.account?.label ?? "Email unknown",
                     state: row.state,
-                    hasCredentials: credentials
+                    hasCredentials: credentials,
+                    recoveryTitle: ChatGPTAccountIdentity.Recovery.action(for: row.state).buttonTitle
                 )
             }
         case .opencodeGo:
@@ -162,7 +163,8 @@ final class AppStore: ObservableObject {
                     email: row.account?.email ?? row.state.snapshot?.accountEmail,
                     fallbackTitle: row.account?.label ?? ambientOpenCodeGoTitle,
                     state: row.state,
-                    hasCredentials: credentials
+                    hasCredentials: credentials,
+                    recoveryTitle: "Retry"
                 )
             }
         case .grok:
@@ -714,29 +716,66 @@ final class AppStore: ObservableObject {
         }
     }
 
-    func refreshCard(_ cardID: String) async {
-        if selected == .chatgpt, let id = UUID(uuidString: cardID),
+    func refreshCard(_ cardID: String, provider: ProviderKind? = nil) async {
+        let kind = provider ?? selected
+        if kind == .chatgpt, let id = UUID(uuidString: cardID),
            settings.chatgptAccounts.contains(where: { $0.id == id }) {
             await refreshChatGPTAccount(id, userInitiated: true)
             return
         }
-        if selected == .opencodeGo, let id = UUID(uuidString: cardID),
+        if kind == .chatgpt, cardID == Self.implicitChatGPTID.uuidString {
+            await refreshImplicitChatGPT(userInitiated: true)
+            return
+        }
+        if kind == .opencodeGo, let id = UUID(uuidString: cardID),
            settings.opencodeGoAccounts.contains(where: { $0.id == id }) {
             await refreshOpenCodeGoAccount(id, userInitiated: true)
             return
         }
-        if selected == .grok, let id = UUID(uuidString: cardID),
+        if kind == .opencodeGo, cardID == Self.implicitOpenCodeGoID.uuidString {
+            await refreshImplicitOpenCodeGo(userInitiated: true)
+            return
+        }
+        if kind == .grok, let id = UUID(uuidString: cardID),
            settings.grokAccounts.contains(where: { $0.id == id }) {
             await recoverGrokCard(id)
+            return
+        }
+        if kind == .grok, cardID == Self.implicitGrokID.uuidString {
+            await refreshImplicitGrok(userInitiated: true)
+            return
+        }
+        if kind == .cursor || kind == .glm {
+            await refresh(kind)
             return
         }
         await refreshSelected()
     }
 
-    /// Card Retry / Re-login. Expired Grok sessions open the same re-login
-    /// flow as Settings; other failures re-fetch and always show loading.
-    func recoverAccountCard(_ cardID: String) {
-        Task { await refreshCard(cardID) }
+    /// Card Retry / Re-login. Expired ChatGPT / Grok sessions open the same
+    /// re-login flow as Settings; other failures re-fetch and show loading.
+    func recoverAccountCard(_ cardID: String, provider: ProviderKind? = nil) {
+        let kind = provider ?? selected
+        if kind == .chatgpt, let id = UUID(uuidString: cardID),
+           settings.chatgptAccounts.contains(where: { $0.id == id }) {
+            switch ChatGPTAccountIdentity.Recovery.action(for: chatgptStates[id] ?? .idle) {
+            case .relogin:
+                CodexLoginPresenter.shared.beginRelogin(store: self, accountId: id)
+            case .retryRefresh:
+                Task { await refreshChatGPTAccount(id, userInitiated: true) }
+            }
+            return
+        }
+        if kind == .grok, let id = UUID(uuidString: cardID),
+           settings.grokAccounts.contains(where: { $0.id == id }) {
+            Task { await recoverGrokCard(id) }
+            return
+        }
+        Task { await refreshCard(cardID, provider: kind) }
+    }
+
+    func recoverOverallRow(_ row: OverallAccountRow) {
+        recoverAccountCard(row.card.id, provider: row.provider)
     }
 
     private func recoverGrokCard(_ id: UUID) async {
@@ -788,13 +827,13 @@ final class AppStore: ObservableObject {
         case .chatgpt:
             if settings.chatgptAccounts.isEmpty {
                 let current = states[.chatgpt] ?? .idle
-                if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+                if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
                     states[.chatgpt] = .loading
                 }
             } else {
                 for account in settings.chatgptAccounts {
                     let current = chatgptStates[account.id] ?? .idle
-                    if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+                    if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
                         chatgptStates[account.id] = .loading
                     }
                 }
@@ -802,13 +841,13 @@ final class AppStore: ObservableObject {
         case .opencodeGo:
             if settings.opencodeGoAccounts.isEmpty {
                 let current = states[.opencodeGo] ?? .idle
-                if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+                if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
                     states[.opencodeGo] = .loading
                 }
             } else {
                 for account in settings.opencodeGoAccounts {
                     let current = opencodeGoStates[account.id] ?? .idle
-                    if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+                    if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
                         opencodeGoStates[account.id] = .loading
                     }
                 }
@@ -816,13 +855,13 @@ final class AppStore: ObservableObject {
         case .grok:
             if settings.grokAccounts.isEmpty {
                 let current = states[.grok] ?? .idle
-                if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+                if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
                     states[.grok] = .loading
                 }
             } else {
                 for account in settings.grokAccounts {
                     let current = grokStates[account.id] ?? .idle
-                    if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+                    if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
                         grokStates[account.id] = .loading
                     }
                 }
@@ -878,7 +917,7 @@ final class AppStore: ObservableObject {
         var jobs: [ChatGPTFetchJob] = []
         for (index, account) in accounts.enumerated() {
             let current = chatgptStates[account.id] ?? .idle
-            if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+            if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
                 chatgptStates[account.id] = .loading
             }
             let auth = chatGPTAuthInputs(for: account.id)
@@ -912,7 +951,7 @@ final class AppStore: ObservableObject {
         // Keep last meters while refreshing. Opening the popover used to
         // flash every card to "Updating…" and then paint a false Sign in
         // if one fetch failed.
-        if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+        if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
             chatgptStates[id] = .loading
         }
 
@@ -952,7 +991,7 @@ final class AppStore: ObservableObject {
     /// Does not persist a new account on each launch.
     private func refreshImplicitChatGPT(userInitiated: Bool) async {
         let current = states[.chatgpt] ?? .idle
-        if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+        if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
             states[.chatgpt] = .loading
         }
         applyImplicitChatGPT(
@@ -1318,7 +1357,7 @@ extension AppStore {
         var jobs: [OpenCodeGoFetchJob] = []
         for (index, account) in accounts.enumerated() {
             let current = opencodeGoStates[account.id] ?? .idle
-            if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+            if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
                 opencodeGoStates[account.id] = .loading
             }
             jobs.append(
@@ -1345,7 +1384,7 @@ extension AppStore {
     fileprivate func refreshOpenCodeGoAccount(_ id: UUID, userInitiated: Bool) async {
         guard settings.opencodeGoAccounts.contains(where: { $0.id == id }) else { return }
         let current = opencodeGoStates[id] ?? .idle
-        if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+        if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
             opencodeGoStates[id] = .loading
         }
         let index = settings.opencodeGoAccounts.firstIndex(where: { $0.id == id }) ?? 0
@@ -1377,9 +1416,9 @@ extension AppStore {
         }
     }
 
-    private func refreshImplicitOpenCodeGo(userInitiated: Bool) async {
+    fileprivate func refreshImplicitOpenCodeGo(userInitiated: Bool) async {
         let current = states[.opencodeGo] ?? .idle
-        if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+        if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
             states[.opencodeGo] = .loading
         }
         let item = await RefreshWork.performOpenCodeGo(
@@ -1775,9 +1814,9 @@ extension AppStore {
         }
     }
 
-    private func refreshImplicitGrok(userInitiated: Bool) async {
+    fileprivate func refreshImplicitGrok(userInitiated: Bool) async {
         let current = states[.grok] ?? .idle
-        if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+        if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
             states[.grok] = .loading
         }
         let item = await RefreshWork.performGrok(
@@ -1884,6 +1923,17 @@ struct AccountCardRow: Identifiable, Equatable {
     var state: ProviderLoadState
     var hasCredentials: Bool = false
     var recoveryTitle: String = "Retry"
+
+    var showsRecoveryAction: Bool {
+        switch state {
+        case .failure, .stale:
+            return true
+        case .signedOut:
+            return hasCredentials || hasKnownEmail
+        default:
+            return false
+        }
+    }
 
     var hasKnownEmail: Bool {
         if let email, !email.isEmpty { return true }

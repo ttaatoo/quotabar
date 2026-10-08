@@ -21,7 +21,10 @@ struct OverallListView: View {
                             now: store.now,
                             treatIdleAsUpdating: store.isRefreshing,
                             reduceMotion: reduceMotion,
-                            onOpen: { store.openOverallRow(row) }
+                            onOpen: { store.openOverallRow(row) },
+                            onRecover: row.card.showsRecoveryAction
+                                ? { store.recoverOverallRow(row) }
+                                : nil
                         )
                     }
                 }
@@ -39,6 +42,7 @@ private struct OverallAccountRowView: View {
     let treatIdleAsUpdating: Bool
     var reduceMotion: Bool = false
     let onOpen: () -> Void
+    var onRecover: (() -> Void)? = nil
 
     @State private var hovering = false
 
@@ -67,6 +71,17 @@ private struct OverallAccountRowView: View {
 
                 if let window = primaryWindow {
                     primaryMeter(window)
+                }
+                if let onRecover, row.card.showsRecoveryAction {
+                    Button(row.card.recoveryTitle, action: onRecover)
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.primary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(
+                            Capsule(style: .continuous).fill(Color.white.opacity(0.10))
+                        )
                 }
             }
             .padding(Theme.overallRowPadding)

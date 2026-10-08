@@ -418,7 +418,7 @@ struct AccountCard: View {
         if row.hasCredentials || hasKnownEmail {
             EmptyStateView(
                 title: "Couldn’t refresh",
-                message: "This account is still saved. Retry, or re-add it in Settings if the session expired.",
+                message: signedOutRecoveryMessage,
                 actionTitle: row.recoveryTitle,
                 action: onRetry,
                 onSelect: onActivate
@@ -460,6 +460,15 @@ struct AccountCard: View {
 
     private func cursorSignedOutTitle(_ message: String) -> String {
         AccountCardRow.signedOutTitle(provider: provider, message: message)
+    }
+
+    private var signedOutRecoveryMessage: String {
+        switch provider {
+        case .chatgpt, .grok:
+            return "This account is still saved. Retry, or Re-login in Settings if the session expired."
+        default:
+            return "This account is still saved. Retry, or open Settings if the session expired."
+        }
     }
 }
 
