@@ -28,7 +28,7 @@ enum GrokAccountIdentity {
         /// Expired Grok sessions cannot be recovered by re-reading auth.json.
         static func action(for state: ProviderLoadState) -> Recovery {
             switch state {
-            case .failure(let message), .signedOut(let message):
+            case .failure(let message), .signedOut(let message), .stale(_, let message):
                 return GrokAuth.isExpiredTokenMessage(message) ? .relogin : .retryRefresh
             default:
                 return .retryRefresh
@@ -142,12 +142,8 @@ enum GrokAccountIdentity {
             let sameHome = representsHome(accounts[index], homePath: standardizedHome)
             let sameToken = accessToken.map { GrokAuth.accessToken(for: accounts[index]) == $0 } ?? false
             if sameToken, !sameHome {
-                let previousHome = accounts[index].grokHomePath
                 accounts[index].grokHomePath = standardizedHome
                 accounts[index].usesAmbientAuthFile = ambient
-                if !GrokAuth.homesMatch(previousHome, standardizedHome) {
-                    GrokAuth.removeManagedHomeIfSafe(previousHome)
-                }
             } else if sameHome {
                 accounts[index].usesAmbientAuthFile = ambient
                 if accounts[index].grokHomePath == nil {

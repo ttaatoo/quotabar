@@ -12,6 +12,13 @@ final class AppStore: ObservableObject {
     @Published var grokStates: [UUID: ProviderLoadState] = [:]
     @Published var now: Date = Date()
     @Published var isRefreshing = false
+    @Published var lastFetchAttempts: [FetchAttempt] = []
+    @Published var lastConfigSaveError: String?
+    @Published private(set) var configLoadKind: ConfigLoadKind = .missing
+    private let refreshCoordinator = RefreshCoordinator()
+    private var consecutivePollFailures = 0
+    private var lastScheduledPollAt: Date?
+    private var refreshStartedAt: [String: Date] = [:]
 
     @Published var cursorCookie: String = ""
     @Published var chatgptCookies: [UUID: String] = [:]
@@ -24,15 +31,27 @@ final class AppStore: ObservableObject {
     private var clockTimer: Timer?
 
     private init() {
-        var loaded = ConfigStore.load()
-        loaded.launchAtLogin = LaunchAtLogin.isEnabled
-        settings = loaded
+        let loaded = ConfigStore.load()
+        configLoadKind = loaded.kind
+        if loaded.kind == .corrupt {
+            lastConfigSaveError = ConfigStore.corruptConfigMessage
+        }
+        var settingsValue = loaded.settings
+        settingsValue.launchAtLogin = LaunchAtLogin.isEnabled
+        settings = settingsValue
         states = Dictionary(uniqueKeysWithValues: ProviderKind.allCases.map { ($0, .idle) })
         cursorCookie = KeychainStore.get(.cursorCookie) ?? ""
         glmAPIKey = KeychainStore.get(.glmAPIKey) ?? ""
         loadChatGPTSecrets()
         loadOpenCodeGoSecrets()
         loadGrokSecrets()
+        if ConfigStore.shouldReconcileKeychain(loaded.kind) {
+            KeychainStore.reconcile(
+                chatgptIDs: settings.chatgptAccounts.map(\.id),
+                grokIDs: settings.grokAccounts.map(\.id),
+                opencodeIDs: settings.opencodeGoAccounts.map(\.id)
+            )
+        }
     }
 
     var selected: ProviderKind { settings.selectedProvider }
@@ -146,7 +165,8 @@ final class AppStore: ObservableObject {
                     email: row.account?.email ?? row.state.snapshot?.accountEmail,
                     fallbackTitle: row.account?.label ?? "Email unknown",
                     state: row.state,
-                    hasCredentials: credentials
+                    hasCredentials: credentials,
+                    recoveryTitle: ChatGPTAccountIdentity.Recovery.action(for: row.state).buttonTitle
                 )
             }
         case .opencodeGo:
@@ -162,7 +182,8 @@ final class AppStore: ObservableObject {
                     email: row.account?.email ?? row.state.snapshot?.accountEmail,
                     fallbackTitle: row.account?.label ?? ambientOpenCodeGoTitle,
                     state: row.state,
-                    hasCredentials: credentials
+                    hasCredentials: credentials,
+                    recoveryTitle: "Retry"
                 )
             }
         case .grok:
@@ -192,7 +213,7 @@ final class AppStore: ObservableObject {
             switch state {
             case .signedOut:
                 fallback = "Not signed in"
-            case .ready(let snapshot):
+            case .ready(let snapshot), .stale(let snapshot, _):
                 if provider == .glm {
                     fallback = snapshot.accountEmail ?? snapshot.planName.map { "GLM \($0)" } ?? "GLM"
                 } else {
@@ -213,36 +234,59 @@ final class AppStore: ObservableObject {
         }
     }
 
-    /// Always at least one row so Overall can show signed-out providers
-    /// (Settings discovery) instead of omitting the section.
+    /// A provider with saved accounts that are all disabled shows nothing.
+    /// A provider with no saved accounts still gets one signed-out discovery row.
     func displayableAccountCards(for provider: ProviderKind) -> [AccountCardRow] {
         let rows = accountCards(for: provider)
-        if rows.isEmpty {
-            return [
-                AccountCardRow(
-                    id: provider.rawValue,
-                    email: nil,
-                    fallbackTitle: "Not signed in",
-                    state: providerState(provider),
-                    hasCredentials: false
-                )
-            ]
+        if !rows.isEmpty { return rows }
+        guard RefreshCoordinator.showsSyntheticSignedOutCard(
+            savedAccountCount: savedAccountCount(for: provider),
+            visibleAccountCount: 0
+        ) else { return [] }
+        return [
+            AccountCardRow(
+                id: provider.rawValue,
+                email: nil,
+                fallbackTitle: "Not signed in",
+                state: providerState(provider),
+                hasCredentials: false
+            )
+        ]
+    }
+
+    private func savedAccountCount(for provider: ProviderKind) -> Int {
+        switch provider {
+        case .chatgpt: return settings.chatgptAccounts.count
+        case .opencodeGo: return settings.opencodeGoAccounts.count
+        case .grok: return settings.grokAccounts.count
+        case .cursor, .glm: return 0
         }
-        return rows
     }
 
     var overallSections: [OverallSection] {
-        visibleProviders.map { provider in
-            OverallSection(
-                provider: provider,
-                rows: displayableAccountCards(for: provider).map { card in
-                    OverallAccountRow(
-                        provider: provider,
-                        card: card,
-                        hint: overallHint(provider: provider, card: card)
-                    )
-                }
-            )
+        visibleProviders.compactMap { provider in
+            let rows = displayableAccountCards(for: provider).map { card in
+                OverallAccountRow(
+                    provider: provider,
+                    card: card,
+                    hint: overallHint(provider: provider, card: card)
+                )
+            }.sorted { lhs, rhs in
+                overallPriority(lhs.card.state) < overallPriority(rhs.card.state)
+            }
+            guard !rows.isEmpty else { return nil }
+            return OverallSection(provider: provider, rows: rows)
+        }
+    }
+
+    private func overallPriority(_ state: ProviderLoadState) -> Int {
+        switch state {
+        case .failure: return 0
+        case .signedOut: return 1
+        case .stale: return 2
+        case .loading: return 3
+        case .idle: return 4
+        case .ready: return 5
         }
     }
 
@@ -252,7 +296,7 @@ final class AppStore: ObservableObject {
     }
 
     private func overallHint(provider: ProviderKind, card: AccountCardRow) -> String {
-        if case .ready(let snapshot) = card.state, let plan = snapshot.planName, !plan.isEmpty {
+        if let snapshot = card.state.snapshot, let plan = snapshot.planName, !plan.isEmpty {
             return plan
         }
         if let label = overallAccountLabel(provider: provider, cardID: card.id),
@@ -303,9 +347,10 @@ final class AppStore: ObservableObject {
                 )
             }
         }
+        guard settings.allowImplicitChatGPT || settings.previewFixtures else { return [] }
         let implicit = states[.chatgpt] ?? .idle
         switch implicit {
-        case .ready, .loading, .failure:
+        case .ready, .stale, .loading, .failure:
             return [ChatGPTDisplayRow(id: Self.implicitChatGPTID, account: nil, state: implicit)]
         case .idle:
             if settings.previewFixtures {
@@ -344,8 +389,7 @@ final class AppStore: ObservableObject {
     }
 
     private func isSignedInChatGPT(_ id: UUID) -> Bool {
-        if case .ready = chatgptStates[id] { return true }
-        return false
+        chatgptStates[id]?.hasUsableSnapshot == true
     }
 
     /// Cookie, pasted JSON, or a readable `auth.json` for this account.
@@ -406,14 +450,70 @@ final class AppStore: ObservableObject {
 
     func restartPolling() {
         pollTimer?.invalidate()
-        let interval = TimeInterval(settings.pollIntervalSeconds)
-        pollTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+        consecutivePollFailures = 0
+        lastScheduledPollAt = Date()
+        scheduleNextPoll()
+    }
+
+    private func scheduleNextPoll() {
+        pollTimer?.invalidate()
+        let base = TimeInterval(settings.pollIntervalSeconds)
+        let interval = RefreshCoordinator.pollDelay(
+            base: base,
+            consecutiveFailures: consecutivePollFailures
+        )
+        let now = Date()
+        let next = RefreshCoordinator.nextScheduledAt(
+            previous: lastScheduledPollAt ?? now,
+            interval: interval,
+            now: now
+        )
+        lastScheduledPollAt = next
+        let delay = max(next.timeIntervalSince(now), 0.1)
+        pollTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             Task { @MainActor [self] in
-                await self?.refreshAll()
+                await self?.refreshAll(recordPollOutcome: true)
+                self?.scheduleNextPoll()
             }
         }
         if let pollTimer {
             RunLoop.main.add(pollTimer, forMode: .common)
+        }
+    }
+
+    private func syncRefreshingFlag() {
+        let next = refreshCoordinator.isRefreshing
+        if isRefreshing != next {
+            isRefreshing = next
+        }
+    }
+
+    private func markRefreshKeyStarted(_ key: String) {
+        refreshStartedAt[key] = Date()
+    }
+
+    private func startedAt(for key: String) -> Date {
+        refreshStartedAt[key] ?? Date()
+    }
+
+    @discardableResult
+    private func beginRefresh(_ key: String) -> Int {
+        markRefreshKeyStarted(key)
+        let generation = refreshCoordinator.begin(key)
+        if refreshStartedAt.count > 64 {
+            let live = refreshCoordinator.inFlightKeys
+            refreshStartedAt = refreshStartedAt.filter { live.contains($0.key) }
+        }
+        return generation
+    }
+
+    func updateSettings(_ mutate: (inout AppSettings) -> Void) {
+        let previousInterval = settings.pollIntervalSeconds
+        mutate(&settings)
+        settings.sanitize()
+        persistSettings()
+        if settings.pollIntervalSeconds != previousInterval {
+            restartPolling()
         }
     }
 
@@ -477,19 +577,24 @@ final class AppStore: ObservableObject {
         Task { await refresh(provider) }
     }
 
-    func updateSettings(_ mutate: (inout AppSettings) -> Void) {
-        mutate(&settings)
-        settings.sanitize()
-        persistSettings()
-        restartPolling()
-    }
-
     func persistSecrets() {
+        secretsPersistTask?.cancel()
         KeychainStore.set(cursorCookie, account: .cursorCookie)
         KeychainStore.set(glmAPIKey, account: .glmAPIKey)
         persistChatGPTSecrets()
         persistOpenCodeGoSecrets()
         persistGrokSecrets()
+    }
+
+    private var secretsPersistTask: Task<Void, Never>?
+
+    func schedulePersistSecrets() {
+        secretsPersistTask?.cancel()
+        secretsPersistTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            persistSecrets()
+        }
     }
 
     private func persistChatGPTSecrets() {
@@ -501,17 +606,101 @@ final class AppStore: ObservableObject {
 
     func setChatGPTCookie(_ value: String, for id: UUID) {
         chatgptCookies[id] = value
-        KeychainStore.set(value, account: .chatgptAccountCookie(id))
+        schedulePersistSecrets()
     }
 
     func setChatGPTJSON(_ value: String, for id: UUID) {
         chatgptJSONs[id] = value
-        KeychainStore.set(value, account: .chatgptAccountJSON(id))
+        schedulePersistSecrets()
     }
 
     func persistSettings() {
+        guard ConfigStore.shouldPersist(configLoadKind) else {
+            lastConfigSaveError = ConfigStore.corruptConfigMessage
+            QuotaBarLog.configError(ConfigStore.corruptConfigMessage)
+            return
+        }
         settings.sanitize()
-        ConfigStore.save(settings)
+        do {
+            let wrote = try ConfigStore.saveIfAllowed(settings, kind: configLoadKind)
+            if wrote {
+                lastConfigSaveError = nil
+            } else {
+                lastConfigSaveError = ConfigStore.corruptConfigMessage
+            }
+        } catch {
+            lastConfigSaveError = error.localizedDescription
+            QuotaBarLog.configError("Failed to save settings: \(error.localizedDescription)")
+        }
+    }
+
+    func recordFetchAttempt(
+        provider: ProviderKind,
+        accountLabel: String,
+        state: ProviderLoadState,
+        startedAt: Date
+    ) {
+        let kind: String
+        let message: String
+        var preservedStale = false
+        switch state {
+        case .ready:
+            kind = "ok"
+            message = "ok"
+        case .stale(_, let staleMessage):
+            kind = "stale"
+            message = staleMessage
+            preservedStale = true
+        case .failure(let text):
+            kind = "failure"
+            message = text
+        case .signedOut(let text):
+            kind = "signedOut"
+            message = text
+        case .loading:
+            kind = "loading"
+            message = "loading"
+        case .idle:
+            kind = "idle"
+            message = "idle"
+        }
+        let attempt = FetchAttempt(
+            id: "\(provider.rawValue):\(accountLabel)",
+            provider: provider,
+            accountLabel: accountLabel,
+            finishedAt: Date(),
+            kind: kind,
+            message: FetchAttempt.redactedMessage(message),
+            durationMs: Int(Date().timeIntervalSince(startedAt) * 1000),
+            preservedStale: preservedStale
+        )
+        lastFetchAttempts.removeAll { $0.id == attempt.id }
+        lastFetchAttempts.insert(attempt, at: 0)
+        if lastFetchAttempts.count > 24 {
+            lastFetchAttempts = Array(lastFetchAttempts.prefix(24))
+        }
+        QuotaBarLog.refreshInfo(attempt.summary)
+    }
+
+    func setAllowImplicitChatGPT(_ enabled: Bool) {
+        guard settings.allowImplicitChatGPT != enabled else { return }
+        settings.allowImplicitChatGPT = enabled
+        persistSettings()
+        Task { await refresh(.chatgpt) }
+    }
+
+    func setAllowImplicitGrok(_ enabled: Bool) {
+        guard settings.allowImplicitGrok != enabled else { return }
+        settings.allowImplicitGrok = enabled
+        persistSettings()
+        Task { await refresh(.grok) }
+    }
+
+    func setAllowImplicitOpenCodeGo(_ enabled: Bool) {
+        guard settings.allowImplicitOpenCodeGo != enabled else { return }
+        settings.allowImplicitOpenCodeGo = enabled
+        persistSettings()
+        Task { await refresh(.opencodeGo) }
     }
 
     func nextChatGPTLabel() -> String {
@@ -540,27 +729,22 @@ final class AppStore: ObservableObject {
         return id
     }
 
-    /// Create-on-success (or refresh an existing email's cookie). Label is the
-    /// session email when present; otherwise ChatGPT / ChatGPT 2. Rename stays
-    /// user-editable and is not overwritten on a later sign-in of the same email.
+    /// Create-on-success, or refresh the row that already holds this cookie.
+    /// Email is a label only — two sessions with the same mailbox stay two rows.
     @discardableResult
     func upsertChatGPTAccount(cookie: String, email: String?) -> UUID {
         let trimmedCookie = ChatGPTClient.normalizeCookie(cookie)
             ?? cookie.trimmingCharacters(in: .whitespacesAndNewlines)
-        let emailValue: String?
-        if let email = email?.trimmingCharacters(in: .whitespacesAndNewlines), !email.isEmpty {
-            emailValue = email
-        } else {
-            emailValue = nil
-        }
+        let emailValue = CodexCLIAuth.usableEmail(email)
 
-        if let emailValue,
+        if !trimmedCookie.isEmpty,
            let existing = settings.chatgptAccounts.first(where: {
-               $0.email?.caseInsensitiveCompare(emailValue) == .orderedSame
+               chatgptCookies[$0.id] == trimmedCookie
            }) {
             setChatGPTCookie(trimmedCookie, for: existing.id)
             recordChatGPTEmail(emailValue, for: existing.id)
             settings.selectedChatGPTAccountId = existing.id
+            persistSecrets()
             persistSettings()
             Task { await refreshChatGPTAccount(existing.id, userInitiated: true) }
             return existing.id
@@ -568,11 +752,10 @@ final class AppStore: ObservableObject {
 
         let label = emailValue ?? nextChatGPTLabel()
         let id = addChatGPTAccount(label: label)
-        if let emailValue, let index = settings.chatgptAccounts.firstIndex(where: { $0.id == id }) {
-            settings.chatgptAccounts[index].email = emailValue
-        }
+        recordChatGPTEmail(emailValue, for: id)
         settings.selectedChatGPTAccountId = id
         setChatGPTCookie(trimmedCookie, for: id)
+        persistSecrets()
         persistSettings()
         Task { await refreshChatGPTAccount(id, userInitiated: true) }
         return id
@@ -594,11 +777,31 @@ final class AppStore: ObservableObject {
         guard let index = settings.chatgptAccounts.firstIndex(where: { $0.id == accountId }) else { return }
         let previousHome = settings.chatgptAccounts[index].codexHomePath
         let standardizedHome = CodexCLIAuth.homeURL(path: homePath)?.path(percentEncoded: false) ?? homePath
+        let incomingToken = CodexCLIAuth.homeURL(path: standardizedHome)
+            .flatMap { CodexCLIAuth.read(home: $0)?.accessToken }
+        if let other = ChatGPTAccountIdentity.matchExisting(
+            accounts: settings.chatgptAccounts,
+            homePath: standardizedHome,
+            accessToken: incomingToken,
+            excluding: accountId
+        ) {
+            ChatGPTAccountIdentity.assignIdentity(
+                email,
+                to: accountId,
+                accounts: &settings.chatgptAccounts
+            )
+            settings.selectedChatGPTAccountId = other.id
+            persistSettings()
+            Task { await refreshChatGPTAccount(other.id, userInitiated: true) }
+            return
+        }
         settings.chatgptAccounts[index].codexHomePath = standardizedHome
         settings.chatgptAccounts[index].usesAmbientCodexHome = ambient
-        if let trimmed = CodexCLIAuth.usableEmail(email) {
-            settings.chatgptAccounts[index].email = trimmed
-        }
+        ChatGPTAccountIdentity.assignIdentity(
+            email,
+            to: accountId,
+            accounts: &settings.chatgptAccounts
+        )
         if previousHome != standardizedHome {
             CodexCLIAuth.removeManagedHomeIfSafe(previousHome)
         }
@@ -618,6 +821,9 @@ final class AppStore: ObservableObject {
         KeychainStore.delete(.chatgptAccountJSON(id))
         if !ambient {
             CodexCLIAuth.removeManagedHomeIfSafe(homePath)
+        }
+        if settings.chatgptAccounts.isEmpty {
+            settings.allowImplicitChatGPT = false
         }
         if settings.selectedChatGPTAccountId == id {
             settings.selectedChatGPTAccountId = nil
@@ -644,34 +850,21 @@ final class AppStore: ObservableObject {
         email: String?,
         ambient: Bool
     ) -> UUID? {
-        let trimmedEmail = CodexCLIAuth.usableEmail(email)
         let standardizedHome = CodexCLIAuth.homeURL(path: homePath)?.path(percentEncoded: false) ?? homePath
-
-        if let trimmedEmail,
-           let existing = settings.chatgptAccounts.first(where: {
-               $0.email?.caseInsensitiveCompare(trimmedEmail) == .orderedSame
-           }) {
-            if let index = settings.chatgptAccounts.firstIndex(where: { $0.id == existing.id }) {
-                let previousHome = settings.chatgptAccounts[index].codexHomePath
-                settings.chatgptAccounts[index].email = trimmedEmail
-                settings.chatgptAccounts[index].codexHomePath = standardizedHome
-                settings.chatgptAccounts[index].usesAmbientCodexHome = ambient
-                if previousHome != standardizedHome {
-                    CodexCLIAuth.removeManagedHomeIfSafe(previousHome)
-                }
-            }
-            settings.selectedChatGPTAccountId = existing.id
-            persistSettings()
-            Task { await refreshChatGPTAccount(existing.id, userInitiated: true) }
-            return existing.id
-        }
-
-        let label = trimmedEmail ?? nextChatGPTLabel()
-        let id = addChatGPTAccount(label: label)
-        if let index = settings.chatgptAccounts.firstIndex(where: { $0.id == id }) {
-            settings.chatgptAccounts[index].email = trimmedEmail
-            settings.chatgptAccounts[index].codexHomePath = standardizedHome
-            settings.chatgptAccounts[index].usesAmbientCodexHome = ambient
+        let tokens = CodexCLIAuth.homeURL(path: standardizedHome).flatMap { CodexCLIAuth.read(home: $0) }
+        let existed = Set(settings.chatgptAccounts.map(\.id))
+        let id = ChatGPTAccountIdentity.upsertFromHome(
+            accounts: &settings.chatgptAccounts,
+            homePath: standardizedHome,
+            email: email ?? tokens?.email,
+            ambient: ambient,
+            accessToken: tokens?.accessToken,
+            nextLabel: nextChatGPTLabel()
+        )
+        if !existed.contains(id) {
+            chatgptCookies[id] = chatgptCookies[id] ?? ""
+            chatgptJSONs[id] = chatgptJSONs[id] ?? ""
+            chatgptStates[id] = .idle
         }
         settings.selectedChatGPTAccountId = id
         persistSettings()
@@ -697,47 +890,84 @@ final class AppStore: ObservableObject {
         SettingsPresenter.open()
     }
 
-    func refreshSelected() async {
-        let alreadyRefreshing = isRefreshing
-        isRefreshing = true
+    func refreshSelected(force: Bool = true) async {
+        let key = "ui:selected"
+        let generation = beginRefresh(key)
+        syncRefreshingFlag()
         defer {
-            if !alreadyRefreshing {
-                isRefreshing = false
-            }
+            refreshCoordinator.finish(key, generation: generation)
+            syncRefreshingFlag()
         }
         // Let SwiftUI paint the spinner before a fast fetch coalesces state updates.
         await Task.yield()
         switch settings.popoverTab {
         case .all:
-            await refreshVisibleProviders()
+            await refreshVisibleProviders(force: force, userInitiated: true)
         case .provider(let provider):
-            await refreshProviderAccounts(provider, userInitiated: true)
+            await refreshProviderAccounts(provider, userInitiated: true, force: force)
         }
     }
 
-    func refreshCard(_ cardID: String) async {
-        if selected == .chatgpt, let id = UUID(uuidString: cardID),
+    func refreshCard(_ cardID: String, provider: ProviderKind? = nil) async {
+        let kind = provider ?? selected
+        if kind == .chatgpt, let id = UUID(uuidString: cardID),
            settings.chatgptAccounts.contains(where: { $0.id == id }) {
             await refreshChatGPTAccount(id, userInitiated: true)
             return
         }
-        if selected == .opencodeGo, let id = UUID(uuidString: cardID),
+        if kind == .chatgpt, cardID == Self.implicitChatGPTID.uuidString {
+            await refreshImplicitChatGPT(userInitiated: true)
+            return
+        }
+        if kind == .opencodeGo, let id = UUID(uuidString: cardID),
            settings.opencodeGoAccounts.contains(where: { $0.id == id }) {
             await refreshOpenCodeGoAccount(id, userInitiated: true)
             return
         }
-        if selected == .grok, let id = UUID(uuidString: cardID),
+        if kind == .opencodeGo, cardID == Self.implicitOpenCodeGoID.uuidString {
+            await refreshImplicitOpenCodeGo(userInitiated: true)
+            return
+        }
+        if kind == .grok, let id = UUID(uuidString: cardID),
            settings.grokAccounts.contains(where: { $0.id == id }) {
             await recoverGrokCard(id)
+            return
+        }
+        if kind == .grok, cardID == Self.implicitGrokID.uuidString {
+            await refreshImplicitGrok(userInitiated: true)
+            return
+        }
+        if kind == .cursor || kind == .glm {
+            await refresh(kind)
             return
         }
         await refreshSelected()
     }
 
-    /// Card Retry / Re-login. Expired Grok sessions open the same re-login
-    /// flow as Settings; other failures re-fetch and always show loading.
-    func recoverAccountCard(_ cardID: String) {
-        Task { await refreshCard(cardID) }
+    /// Card Retry / Re-login. Expired ChatGPT / Grok sessions open the same
+    /// re-login flow as Settings; other failures re-fetch and show loading.
+    func recoverAccountCard(_ cardID: String, provider: ProviderKind? = nil) {
+        let kind = provider ?? selected
+        if kind == .chatgpt, let id = UUID(uuidString: cardID),
+           settings.chatgptAccounts.contains(where: { $0.id == id }) {
+            switch ChatGPTAccountIdentity.Recovery.action(for: chatgptStates[id] ?? .idle) {
+            case .relogin:
+                CodexLoginPresenter.shared.beginRelogin(store: self, accountId: id)
+            case .retryRefresh:
+                Task { await refreshChatGPTAccount(id, userInitiated: true) }
+            }
+            return
+        }
+        if kind == .grok, let id = UUID(uuidString: cardID),
+           settings.grokAccounts.contains(where: { $0.id == id }) {
+            Task { await recoverGrokCard(id) }
+            return
+        }
+        Task { await refreshCard(cardID, provider: kind) }
+    }
+
+    func recoverOverallRow(_ row: OverallAccountRow) {
+        recoverAccountCard(row.card.id, provider: row.provider)
     }
 
     private func recoverGrokCard(_ id: UUID) async {
@@ -750,37 +980,169 @@ final class AppStore: ObservableObject {
         }
     }
 
-    func refreshAll() async {
-        isRefreshing = true
-        defer { isRefreshing = false }
-        await refreshVisibleProviders()
+    func refreshAll(recordPollOutcome: Bool = false) async {
+        let key = "ui:all"
+        let generation = beginRefresh(key)
+        syncRefreshingFlag()
+        defer {
+            refreshCoordinator.finish(key, generation: generation)
+            syncRefreshingFlag()
+        }
+        await refreshVisibleProviders(
+            force: true,
+            userInitiated: false,
+            recordPollOutcome: recordPollOutcome
+        )
     }
 
     /// Shared fan-out used by poll, All-tab refresh, and `refreshAll`.
     /// Does not invent a second pipeline — same `refresh(_:)` jobs as before.
-    private func refreshVisibleProviders() async {
-        let providers = visibleProviders
+    private func refreshVisibleProviders(
+        force: Bool,
+        userInitiated: Bool,
+        recordPollOutcome: Bool = false
+    ) async {
+        let providers = visibleProviders.filter { provider in
+            force || needsProviderRefresh(provider)
+        }
         // Paint every card as in-flight before any provider hops off MainActor.
         // Otherwise ChatGPT `.loading` + later `.idle` both read as "Updating…".
         for provider in providers {
-            markRefreshStarted(provider, userInitiated: false)
+            markRefreshStarted(provider, userInitiated: userInitiated)
         }
         // Fan-out off MainActor so ChatGPT / Go cannot stall Cursor / GLM / Grok.
-        await RefreshWork.mapConcurrent(providers) { provider in
-            await AppStore.shared.refresh(provider)
+        _ = await RefreshWork.mapConcurrent(providers) { provider in
+            await AppStore.shared.refresh(provider, userInitiated: userInitiated, force: true)
+        }
+        if recordPollOutcome {
+            notePollOutcome()
         }
     }
 
-    private func refreshProviderAccounts(_ provider: ProviderKind, userInitiated: Bool) async {
+    private func refreshProviderAccounts(
+        _ provider: ProviderKind,
+        userInitiated: Bool,
+        force: Bool
+    ) async {
         switch provider {
         case .chatgpt:
-            await refreshAllChatGPTAccounts(userInitiated: userInitiated)
+            await refreshAllChatGPTAccounts(userInitiated: userInitiated, force: force)
         case .opencodeGo:
-            await refreshAllOpenCodeGoAccounts(userInitiated: userInitiated)
+            await refreshAllOpenCodeGoAccounts(userInitiated: userInitiated, force: force)
         case .grok:
-            await refreshAllGrokAccounts(userInitiated: userInitiated)
+            await refreshAllGrokAccounts(userInitiated: userInitiated, force: force)
         case .cursor, .glm:
-            await refresh(provider)
+            await refresh(provider, userInitiated: userInitiated, force: force)
+        }
+    }
+
+    private func needsProviderRefresh(_ provider: ProviderKind) -> Bool {
+        switch provider {
+        case .chatgpt:
+            if settings.chatgptAccounts.isEmpty {
+                return RefreshCoordinator.needsOpenRefresh(states[.chatgpt] ?? .idle, force: false)
+            }
+            return visibleChatGPTAccounts.contains {
+                RefreshCoordinator.needsOpenRefresh(chatgptStates[$0.id] ?? .idle, force: false)
+            }
+        case .opencodeGo:
+            if settings.opencodeGoAccounts.isEmpty {
+                return RefreshCoordinator.needsOpenRefresh(states[.opencodeGo] ?? .idle, force: false)
+            }
+            return visibleOpenCodeGoAccounts.contains {
+                RefreshCoordinator.needsOpenRefresh(opencodeGoStates[$0.id] ?? .idle, force: false)
+            }
+        case .grok:
+            if settings.grokAccounts.isEmpty {
+                return RefreshCoordinator.needsOpenRefresh(states[.grok] ?? .idle, force: false)
+            }
+            return visibleGrokAccounts.contains {
+                RefreshCoordinator.needsOpenRefresh(grokStates[$0.id] ?? .idle, force: false)
+            }
+        case .cursor, .glm:
+            return RefreshCoordinator.needsOpenRefresh(states[provider] ?? .idle, force: false)
+        }
+    }
+
+    private func notePollOutcome() {
+        let observations = visibleProviders.flatMap { pollObservations(for: $0) }
+        consecutivePollFailures = RefreshCoordinator.nextPollFailureCount(
+            current: consecutivePollFailures,
+            observations: observations
+        )
+    }
+
+    /// Enabled rows only. Disabled accounts are hidden and must not stretch the poll interval.
+    private func pollObservations(for provider: ProviderKind) -> [RefreshCoordinator.PollObservation] {
+        switch provider {
+        case .chatgpt:
+            let accounts = settings.chatgptAccounts.filter(\.enabled)
+            if accounts.isEmpty {
+                return [RefreshCoordinator.observation(
+                    hasCredentials: settings.allowImplicitChatGPT && CodexCLIAuth.read() != nil,
+                    state: states[.chatgpt] ?? .idle
+                )]
+            }
+            return accounts.map { account in
+                RefreshCoordinator.observation(
+                    hasCredentials: hasChatGPTCredentials(account.id),
+                    state: chatgptStates[account.id] ?? .idle
+                )
+            }
+        case .opencodeGo:
+            let accounts = settings.opencodeGoAccounts.filter(\.enabled)
+            if accounts.isEmpty {
+                return [RefreshCoordinator.observation(
+                    hasCredentials: settings.allowImplicitOpenCodeGo
+                        && OpenCodeGoClient.resolveToken(explicit: nil) != nil,
+                    state: states[.opencodeGo] ?? .idle
+                )]
+            }
+            return accounts.map { account in
+                RefreshCoordinator.observation(
+                    hasCredentials: hasOpenCodeGoCredentials(account.id),
+                    state: opencodeGoStates[account.id] ?? .idle
+                )
+            }
+        case .grok:
+            let accounts = settings.grokAccounts.filter(\.enabled)
+            if accounts.isEmpty {
+                return [RefreshCoordinator.observation(
+                    hasCredentials: settings.allowImplicitGrok && GrokAuth.loadAuthFile() != nil,
+                    state: states[.grok] ?? .idle
+                )]
+            }
+            return accounts.map { account in
+                RefreshCoordinator.observation(
+                    hasCredentials: hasGrokCredentials(account.id),
+                    state: grokStates[account.id] ?? .idle
+                )
+            }
+        case .cursor:
+            return [RefreshCoordinator.observation(
+                hasCredentials: hasCursorCredentials(),
+                state: states[.cursor] ?? .idle
+            )]
+        case .glm:
+            return [RefreshCoordinator.observation(
+                hasCredentials: GLMClient.resolveToken(explicit: emptyToNil(glmAPIKey)) != nil,
+                state: states[.glm] ?? .idle
+            )]
+        }
+    }
+
+    private func hasCursorCredentials() -> Bool {
+        (try? CursorAuth.resolveSession(pasted: emptyToNil(cursorCookie))) != nil
+    }
+
+    private func hasSingleProviderCredentials(_ provider: ProviderKind) -> Bool {
+        switch provider {
+        case .cursor:
+            return hasCursorCredentials()
+        case .glm:
+            return GLMClient.resolveToken(explicit: emptyToNil(glmAPIKey)) != nil
+        case .chatgpt, .opencodeGo, .grok:
+            return false
         }
     }
 
@@ -789,13 +1151,13 @@ final class AppStore: ObservableObject {
         case .chatgpt:
             if settings.chatgptAccounts.isEmpty {
                 let current = states[.chatgpt] ?? .idle
-                if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+                if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
                     states[.chatgpt] = .loading
                 }
             } else {
                 for account in settings.chatgptAccounts {
                     let current = chatgptStates[account.id] ?? .idle
-                    if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+                    if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
                         chatgptStates[account.id] = .loading
                     }
                 }
@@ -803,13 +1165,13 @@ final class AppStore: ObservableObject {
         case .opencodeGo:
             if settings.opencodeGoAccounts.isEmpty {
                 let current = states[.opencodeGo] ?? .idle
-                if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+                if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
                     states[.opencodeGo] = .loading
                 }
             } else {
                 for account in settings.opencodeGoAccounts {
                     let current = opencodeGoStates[account.id] ?? .idle
-                    if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+                    if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
                         opencodeGoStates[account.id] = .loading
                     }
                 }
@@ -817,36 +1179,56 @@ final class AppStore: ObservableObject {
         case .grok:
             if settings.grokAccounts.isEmpty {
                 let current = states[.grok] ?? .idle
-                if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+                if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
                     states[.grok] = .loading
                 }
             } else {
                 for account in settings.grokAccounts {
                     let current = grokStates[account.id] ?? .idle
-                    if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+                    if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
                         grokStates[account.id] = .loading
                     }
                 }
             }
         default:
-            states[provider] = .loading
+            let current = states[provider] ?? .idle
+            if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
+                states[provider] = .loading
+            }
         }
     }
 
-    func refresh(_ provider: ProviderKind) async {
+    func refresh(
+        _ provider: ProviderKind,
+        userInitiated: Bool = false,
+        force: Bool = true
+    ) async {
         if provider == .chatgpt {
-            await refreshAllChatGPTAccounts(userInitiated: false)
+            await refreshAllChatGPTAccounts(userInitiated: userInitiated, force: force)
             return
         }
         if provider == .opencodeGo {
-            await refreshAllOpenCodeGoAccounts(userInitiated: false)
+            await refreshAllOpenCodeGoAccounts(userInitiated: userInitiated, force: force)
             return
         }
         if provider == .grok {
-            await refreshAllGrokAccounts(userInitiated: false)
+            await refreshAllGrokAccounts(userInitiated: userInitiated, force: force)
             return
         }
-        states[provider] = .loading
+        if !force, !RefreshCoordinator.needsOpenRefresh(states[provider] ?? .idle, force: false) {
+            return
+        }
+        let key = RefreshCoordinator.key(provider)
+        let generation = beginRefresh(key)
+        syncRefreshingFlag()
+        defer {
+            refreshCoordinator.finish(key, generation: generation)
+            syncRefreshingFlag()
+        }
+        let current = states[provider] ?? .idle
+        if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
+            states[provider] = .loading
+        }
         let job = SingleProviderFetchJob(
             provider: provider,
             preview: settings.previewFixtures,
@@ -854,32 +1236,50 @@ final class AppStore: ObservableObject {
             glmAPIKey: emptyToNil(glmAPIKey),
             glmRegion: settings.glmRegion
         )
-        switch await RefreshWork.performSingle(job) {
+        let result = await RefreshWork.performSingle(job)
+        guard refreshCoordinator.isCurrent(key, generation: generation) else { return }
+        switch result {
         case .success(let snapshot):
             states[provider] = .ready(snapshot)
         case .failure(let error):
-            if error.isAuthFailure {
-                states[provider] = .signedOut(error.errorDescription ?? provider.signInHint)
-            } else {
-                states[provider] = .failure(error.errorDescription ?? "Something went wrong.")
-            }
+            if error.isCancellation { return }
+            states[provider] = ProviderLoadState.afterFailure(
+                previous: current,
+                error: error,
+                hasCredentials: hasSingleProviderCredentials(provider),
+                signInHint: provider.signInHint
+            )
         }
+        recordFetchAttempt(
+            provider: provider,
+            accountLabel: provider.title,
+            state: states[provider] ?? .idle,
+            startedAt: startedAt(for: key)
+        )
     }
 
-    private func refreshAllChatGPTAccounts(userInitiated: Bool) async {
+    private func refreshAllChatGPTAccounts(userInitiated: Bool, force: Bool = true) async {
         let accounts = settings.chatgptAccounts
         if accounts.isEmpty {
             if settings.previewFixtures {
                 await refreshChatGPTPreviewFallback(userInitiated: userInitiated)
-            } else {
+            } else if settings.allowImplicitChatGPT {
                 await refreshImplicitChatGPT(userInitiated: userInitiated)
+            } else {
+                states[.chatgpt] = .signedOut(ProviderKind.chatgpt.signInHint)
             }
             return
         }
         var jobs: [ChatGPTFetchJob] = []
-        for (index, account) in accounts.enumerated() {
+        var generations: [UUID: Int] = [:]
+        for (index, account) in accounts.enumerated() where account.enabled {
             let current = chatgptStates[account.id] ?? .idle
-            if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+            if !force, !RefreshCoordinator.needsOpenRefresh(current, force: false) {
+                continue
+            }
+            let key = RefreshCoordinator.key(.chatgpt, accountID: account.id)
+            generations[account.id] = beginRefresh(key)
+            if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
                 chatgptStates[account.id] = .loading
             }
             let auth = chatGPTAuthInputs(for: account.id)
@@ -897,23 +1297,35 @@ final class AppStore: ObservableObject {
                 )
             )
         }
+        syncRefreshingFlag()
 
         let results = await RefreshWork.mapConcurrent(jobs) { job in
             await RefreshWork.performChatGPT(job)
         }
         for item in results {
-            applyChatGPTResult(item)
+            let key = RefreshCoordinator.key(.chatgpt, accountID: item.id)
+            let generation = generations[item.id] ?? 0
+            applyChatGPTResult(item, key: key, generation: generation)
+            refreshCoordinator.finish(key, generation: generation)
         }
+        syncRefreshingFlag()
         ensureActiveChatGPTAccount()
     }
 
     private func refreshChatGPTAccount(_ id: UUID, userInitiated: Bool) async {
         guard settings.chatgptAccounts.contains(where: { $0.id == id }) else { return }
         let current = chatgptStates[id] ?? .idle
+        let key = RefreshCoordinator.key(.chatgpt, accountID: id)
+        let generation = beginRefresh(key)
+        syncRefreshingFlag()
+        defer {
+            refreshCoordinator.finish(key, generation: generation)
+            syncRefreshingFlag()
+        }
         // Keep last meters while refreshing. Opening the popover used to
         // flash every card to "Updating…" and then paint a false Sign in
         // if one fetch failed.
-        if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+        if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
             chatgptStates[id] = .loading
         }
 
@@ -930,95 +1342,98 @@ final class AppStore: ObservableObject {
             preview: settings.previewFixtures,
             variant: index
         )
-        applyChatGPTResult(await RefreshWork.performChatGPT(job))
+        applyChatGPTResult(await RefreshWork.performChatGPT(job), key: key, generation: generation)
     }
 
-    private func applyChatGPTResult(_ item: AccountFetchResult) {
+    private func applyChatGPTResult(_ item: AccountFetchResult, key: String, generation: Int) {
+        guard refreshCoordinator.isCurrent(key, generation: generation) else { return }
         switch item.result {
         case .success(let snapshot):
             chatgptStates[item.id] = .ready(snapshot)
             recordChatGPTEmail(snapshot.accountEmail, for: item.id)
         case .failure(let error):
-            chatgptStates[item.id] = chatGPTFailureState(
+            if error.isCancellation { return }
+            chatgptStates[item.id] = ProviderLoadState.afterFailure(
                 previous: item.previous,
-                id: item.id,
-                error: error
+                error: error,
+                hasCredentials: hasChatGPTCredentials(item.id),
+                signInHint: ProviderKind.chatgpt.signInHint
             )
         }
-    }
-
-    /// Auth failure without credentials → signed out. Anything else keeps the
-    /// last snapshot so switching or a sibling fetch cannot wipe a good card.
-    private func chatGPTFailureState(
-        previous: ProviderLoadState,
-        id: UUID,
-        error: Error
-    ) -> ProviderLoadState {
-        let message: String
-        let authFailure: Bool
-        if let quota = error as? QuotaError {
-            message = quota.errorDescription ?? ProviderKind.chatgpt.signInHint
-            authFailure = quota.isAuthFailure
-        } else {
-            message = error.localizedDescription
-            authFailure = false
-        }
-
-        if case .ready(let snapshot) = previous {
-            return .ready(snapshot)
-        }
-        if authFailure, !hasChatGPTCredentials(id) {
-            return .signedOut(message)
-        }
-        return .failure(message)
+        let label = settings.chatgptAccounts.first(where: { $0.id == item.id })?.displayTitle
+            ?? item.id.uuidString
+        recordFetchAttempt(
+            provider: .chatgpt,
+            accountLabel: label,
+            state: chatgptStates[item.id] ?? .idle,
+            startedAt: startedAt(for: key)
+        )
     }
 
     /// Uses ~/.codex/auth.json when no ChatGPT account has been added yet.
     /// Does not persist a new account on each launch.
     private func refreshImplicitChatGPT(userInitiated: Bool) async {
+        let key = RefreshCoordinator.key(.chatgpt, accountID: Self.implicitChatGPTID)
+        let generation = beginRefresh(key)
+        syncRefreshingFlag()
+        defer {
+            refreshCoordinator.finish(key, generation: generation)
+            syncRefreshingFlag()
+        }
         let current = states[.chatgpt] ?? .idle
-        if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+        if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
             states[.chatgpt] = .loading
         }
-        applyImplicitChatGPT(
-            current,
-            await RefreshWork.performChatGPT(
-                ChatGPTFetchJob(
-                    id: Self.implicitChatGPTID,
-                    previous: current,
-                    cookie: nil,
-                    json: nil,
-                    home: nil,
-                    allowAmbient: true,
-                    email: nil,
-                    preview: false,
-                    variant: 0
-                )
+        let item = await RefreshWork.performChatGPT(
+            ChatGPTFetchJob(
+                id: Self.implicitChatGPTID,
+                previous: current,
+                cookie: nil,
+                json: nil,
+                home: nil,
+                allowAmbient: true,
+                email: nil,
+                preview: false,
+                variant: 0
             )
+        )
+        guard refreshCoordinator.isCurrent(key, generation: generation) else { return }
+        applyImplicitChatGPT(current, item)
+        recordFetchAttempt(
+            provider: .chatgpt,
+            accountLabel: "implicit",
+            state: states[.chatgpt] ?? .idle,
+            startedAt: startedAt(for: key)
         )
     }
 
     private func refreshChatGPTPreviewFallback(userInitiated _: Bool) async {
+        let key = RefreshCoordinator.key(.chatgpt, accountID: Self.implicitChatGPTID)
+        let generation = beginRefresh(key)
+        syncRefreshingFlag()
+        defer {
+            refreshCoordinator.finish(key, generation: generation)
+            syncRefreshingFlag()
+        }
         let current = states[.chatgpt] ?? .idle
         if shouldShowLoading(current) {
             states[.chatgpt] = .loading
         }
-        applyImplicitChatGPT(
-            current,
-            await RefreshWork.performChatGPT(
-                ChatGPTFetchJob(
-                    id: Self.implicitChatGPTID,
-                    previous: current,
-                    cookie: nil,
-                    json: nil,
-                    home: nil,
-                    allowAmbient: false,
-                    email: nil,
-                    preview: true,
-                    variant: 0
-                )
+        let item = await RefreshWork.performChatGPT(
+            ChatGPTFetchJob(
+                id: Self.implicitChatGPTID,
+                previous: current,
+                cookie: nil,
+                json: nil,
+                home: nil,
+                allowAmbient: false,
+                email: nil,
+                preview: true,
+                variant: 0
             )
         )
+        guard refreshCoordinator.isCurrent(key, generation: generation) else { return }
+        applyImplicitChatGPT(current, item)
     }
 
     private func applyImplicitChatGPT(_ current: ProviderLoadState, _ item: AccountFetchResult) {
@@ -1026,13 +1441,13 @@ final class AppStore: ObservableObject {
         case .success(let snapshot):
             states[.chatgpt] = .ready(snapshot)
         case .failure(let error):
-            if case .ready(let snapshot) = current {
-                states[.chatgpt] = .ready(snapshot)
-            } else if error.isAuthFailure {
-                states[.chatgpt] = .signedOut(error.errorDescription ?? ProviderKind.chatgpt.signInHint)
-            } else {
-                states[.chatgpt] = .failure(error.errorDescription ?? error.localizedDescription)
-            }
+            if error.isCancellation { return }
+            states[.chatgpt] = ProviderLoadState.afterFailure(
+                previous: current,
+                error: error,
+                hasCredentials: CodexCLIAuth.read() != nil,
+                signInHint: ProviderKind.chatgpt.signInHint
+            )
         }
     }
 
@@ -1059,18 +1474,22 @@ final class AppStore: ObservableObject {
         switch state {
         case .idle, .loading:
             return true
-        case .ready, .signedOut, .failure:
+        case .ready, .stale, .signedOut, .failure:
             return false
         }
     }
 
     private func recordChatGPTEmail(_ email: String?, for id: UUID) {
-        let trimmed = CodexCLIAuth.usableEmail(email)
-        guard let trimmed else { return }
-        guard let index = settings.chatgptAccounts.firstIndex(where: { $0.id == id }) else { return }
-        guard settings.chatgptAccounts[index].email != trimmed else { return }
-        settings.chatgptAccounts[index].email = trimmed
-        persistSettings()
+        guard settings.chatgptAccounts.contains(where: { $0.id == id }) else { return }
+        let before = settings.chatgptAccounts.first(where: { $0.id == id })?.email
+        ChatGPTAccountIdentity.assignIdentity(
+            email,
+            to: id,
+            accounts: &settings.chatgptAccounts
+        )
+        if settings.chatgptAccounts.first(where: { $0.id == id })?.email != before {
+            persistSettings()
+        }
     }
 
     private func loadChatGPTSecrets() {
@@ -1133,9 +1552,10 @@ extension AppStore {
                 )
             }
         }
+        guard settings.allowImplicitOpenCodeGo || settings.previewFixtures else { return [] }
         let implicit = states[.opencodeGo] ?? .idle
         switch implicit {
-        case .ready, .loading, .failure:
+        case .ready, .stale, .loading, .failure:
             return [OpenCodeGoDisplayRow(id: Self.implicitOpenCodeGoID, account: nil, state: implicit)]
         case .idle:
             if settings.previewFixtures || OpenCodeGoClient.resolveToken(explicit: nil) != nil {
@@ -1152,11 +1572,11 @@ extension AppStore {
 
     /// True when Settings should show the env/implicit OpenCode row instead of an empty state.
     var hasAmbientOpenCodeGoSource: Bool {
-        guard settings.opencodeGoAccounts.isEmpty else { return false }
+        guard settings.opencodeGoAccounts.isEmpty, settings.allowImplicitOpenCodeGo else { return false }
         if OpenCodeGoClient.resolveToken(explicit: nil) != nil { return true }
         if settings.previewFixtures { return true }
         switch states[.opencodeGo] ?? .idle {
-        case .ready, .loading, .failure:
+        case .ready, .stale, .loading, .failure:
             return true
         case .idle, .signedOut:
             return false
@@ -1205,6 +1625,11 @@ extension AppStore {
                 return "\(percent)% left"
             }
             return snapshot.planName.map { "Live \($0) quota" } ?? "Live quota"
+        case .stale(let snapshot, let message):
+            if let remaining = snapshot.mostConstrainedRemaining {
+                return "\(Int(remaining.rounded()))% left · \(message)"
+            }
+            return message
         case .loading:
             return "Refreshing quota"
         case .failure(let message), .signedOut(let message):
@@ -1238,8 +1663,7 @@ extension AppStore {
     }
 
     private func isSignedInOpenCodeGo(_ id: UUID) -> Bool {
-        if case .ready = opencodeGoStates[id] { return true }
-        return false
+        opencodeGoStates[id]?.hasUsableSnapshot == true
     }
 
     func hasOpenCodeGoCredentials(_ id: UUID) -> Bool {
@@ -1285,7 +1709,8 @@ extension AppStore {
         guard let token = OpenCodeGoClient.resolveToken(explicit: nil) else { return nil }
         let id = addOpenCodeGoAccount(label: "OpenCode")
         setOpenCodeGoAPIKey(token, for: id)
-        if case .ready(let snapshot) = states[.opencodeGo] {
+        persistSecrets()
+        if let snapshot = states[.opencodeGo]?.snapshot {
             opencodeGoStates[id] = .ready(snapshot)
             recordOpenCodeGoEmail(snapshot.accountEmail, for: id)
         }
@@ -1305,6 +1730,9 @@ extension AppStore {
         opencodeGoAPIKeys[id] = nil
         opencodeGoStates[id] = nil
         KeychainStore.delete(.opencodeGoAPIKey(id))
+        if settings.opencodeGoAccounts.isEmpty {
+            settings.allowImplicitOpenCodeGo = false
+        }
         if settings.selectedOpenCodeGoAccountId == id {
             settings.selectedOpenCodeGoAccountId = nil
             settings.resolveSelectedOpenCodeGoAccount(preferring: signedInOpenCodeGoAccountIDs())
@@ -1314,7 +1742,7 @@ extension AppStore {
 
     func setOpenCodeGoAPIKey(_ value: String, for id: UUID) {
         opencodeGoAPIKeys[id] = value
-        KeychainStore.set(value, account: .opencodeGoAPIKey(id))
+        schedulePersistSecrets()
     }
 
     fileprivate func persistOpenCodeGoSecrets() {
@@ -1330,16 +1758,26 @@ extension AppStore {
         }
     }
 
-    fileprivate func refreshAllOpenCodeGoAccounts(userInitiated: Bool) async {
+    fileprivate func refreshAllOpenCodeGoAccounts(userInitiated: Bool, force: Bool = true) async {
         let accounts = settings.opencodeGoAccounts
         if accounts.isEmpty {
-            await refreshImplicitOpenCodeGo(userInitiated: userInitiated)
+            if settings.allowImplicitOpenCodeGo || settings.previewFixtures {
+                await refreshImplicitOpenCodeGo(userInitiated: userInitiated)
+            } else {
+                states[.opencodeGo] = .signedOut(ProviderKind.opencodeGo.signInHint)
+            }
             return
         }
         var jobs: [OpenCodeGoFetchJob] = []
-        for (index, account) in accounts.enumerated() {
+        var generations: [UUID: Int] = [:]
+        for (index, account) in accounts.enumerated() where account.enabled {
             let current = opencodeGoStates[account.id] ?? .idle
-            if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+            if !force, !RefreshCoordinator.needsOpenRefresh(current, force: false) {
+                continue
+            }
+            let key = RefreshCoordinator.key(.opencodeGo, accountID: account.id)
+            generations[account.id] = beginRefresh(key)
+            if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
                 opencodeGoStates[account.id] = .loading
             }
             jobs.append(
@@ -1353,20 +1791,32 @@ extension AppStore {
                 )
             )
         }
+        syncRefreshingFlag()
 
         let results = await RefreshWork.mapConcurrent(jobs) { job in
             await RefreshWork.performOpenCodeGo(job)
         }
         for item in results {
-            applyOpenCodeGoResult(item)
+            let key = RefreshCoordinator.key(.opencodeGo, accountID: item.id)
+            let generation = generations[item.id] ?? 0
+            applyOpenCodeGoResult(item, key: key, generation: generation)
+            refreshCoordinator.finish(key, generation: generation)
         }
+        syncRefreshingFlag()
         ensureActiveOpenCodeGoAccount()
     }
 
     fileprivate func refreshOpenCodeGoAccount(_ id: UUID, userInitiated: Bool) async {
         guard settings.opencodeGoAccounts.contains(where: { $0.id == id }) else { return }
         let current = opencodeGoStates[id] ?? .idle
-        if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+        let key = RefreshCoordinator.key(.opencodeGo, accountID: id)
+        let generation = beginRefresh(key)
+        syncRefreshingFlag()
+        defer {
+            refreshCoordinator.finish(key, generation: generation)
+            syncRefreshingFlag()
+        }
+        if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
             opencodeGoStates[id] = .loading
         }
         let index = settings.opencodeGoAccounts.firstIndex(where: { $0.id == id }) ?? 0
@@ -1379,49 +1829,44 @@ extension AppStore {
             preview: settings.previewFixtures,
             variant: index
         )
-        applyOpenCodeGoResult(await RefreshWork.performOpenCodeGo(job))
+        applyOpenCodeGoResult(await RefreshWork.performOpenCodeGo(job), key: key, generation: generation)
     }
 
-    private func applyOpenCodeGoResult(_ item: AccountFetchResult) {
+    private func applyOpenCodeGoResult(_ item: AccountFetchResult, key: String, generation: Int) {
+        guard refreshCoordinator.isCurrent(key, generation: generation) else { return }
         switch item.result {
         case .success(let snapshot):
             opencodeGoStates[item.id] = .ready(snapshot)
             recordOpenCodeGoEmail(snapshot.accountEmail, for: item.id)
         case .failure(let error):
-            opencodeGoStates[item.id] = openCodeGoFailureState(
+            if error.isCancellation { return }
+            opencodeGoStates[item.id] = ProviderLoadState.afterFailure(
                 previous: item.previous,
-                id: item.id,
-                error: error
+                error: error,
+                hasCredentials: hasOpenCodeGoCredentials(item.id),
+                signInHint: ProviderKind.opencodeGo.signInHint
             )
         }
+        let label = settings.opencodeGoAccounts.first(where: { $0.id == item.id })?.displayTitle
+            ?? item.id.uuidString
+        recordFetchAttempt(
+            provider: .opencodeGo,
+            accountLabel: label,
+            state: opencodeGoStates[item.id] ?? .idle,
+            startedAt: startedAt(for: key)
+        )
     }
 
-    private func openCodeGoFailureState(
-        previous: ProviderLoadState,
-        id: UUID,
-        error: Error
-    ) -> ProviderLoadState {
-        let message: String
-        let authFailure: Bool
-        if let quota = error as? QuotaError {
-            message = quota.errorDescription ?? ProviderKind.opencodeGo.signInHint
-            authFailure = quota.isAuthFailure
-        } else {
-            message = error.localizedDescription
-            authFailure = false
+    fileprivate func refreshImplicitOpenCodeGo(userInitiated: Bool) async {
+        let key = RefreshCoordinator.key(.opencodeGo, accountID: Self.implicitOpenCodeGoID)
+        let generation = beginRefresh(key)
+        syncRefreshingFlag()
+        defer {
+            refreshCoordinator.finish(key, generation: generation)
+            syncRefreshingFlag()
         }
-        if case .ready(let snapshot) = previous {
-            return .ready(snapshot)
-        }
-        if authFailure, !hasOpenCodeGoCredentials(id) {
-            return .signedOut(message)
-        }
-        return .failure(message)
-    }
-
-    private func refreshImplicitOpenCodeGo(userInitiated: Bool) async {
         let current = states[.opencodeGo] ?? .idle
-        if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+        if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
             states[.opencodeGo] = .loading
         }
         let item = await RefreshWork.performOpenCodeGo(
@@ -1434,17 +1879,18 @@ extension AppStore {
                 variant: 0
             )
         )
+        guard refreshCoordinator.isCurrent(key, generation: generation) else { return }
         switch item.result {
         case .success(let snapshot):
             states[.opencodeGo] = .ready(snapshot)
         case .failure(let error):
-            if case .ready(let snapshot) = current {
-                states[.opencodeGo] = .ready(snapshot)
-            } else if error.isAuthFailure {
-                states[.opencodeGo] = .signedOut(error.errorDescription ?? ProviderKind.opencodeGo.signInHint)
-            } else {
-                states[.opencodeGo] = .failure(error.errorDescription ?? "Something went wrong.")
-            }
+            if error.isCancellation { return }
+            states[.opencodeGo] = ProviderLoadState.afterFailure(
+                previous: current,
+                error: error,
+                hasCredentials: OpenCodeGoClient.resolveToken(explicit: nil) != nil,
+                signInHint: ProviderKind.opencodeGo.signInHint
+            )
         }
     }
 
@@ -1529,9 +1975,10 @@ extension AppStore {
                 )
             }
         }
+        guard settings.allowImplicitGrok || settings.previewFixtures else { return [] }
         let implicit = states[.grok] ?? .idle
         switch implicit {
-        case .ready, .loading, .failure:
+        case .ready, .stale, .loading, .failure:
             return [GrokDisplayRow(id: Self.implicitGrokID, account: nil, state: implicit)]
         case .idle:
             if settings.previewFixtures {
@@ -1577,8 +2024,7 @@ extension AppStore {
     }
 
     private func isSignedInGrok(_ id: UUID) -> Bool {
-        if case .ready = grokStates[id] { return true }
-        return false
+        grokStates[id]?.hasUsableSnapshot == true
     }
 
     func hasGrokCredentials(_ id: UUID) -> Bool {
@@ -1653,6 +2099,9 @@ extension AppStore {
         if !ambient {
             GrokAuth.removeManagedHomeIfSafe(homePath)
         }
+        if settings.grokAccounts.isEmpty {
+            settings.allowImplicitGrok = false
+        }
         if settings.selectedGrokAccountId == id {
             settings.selectedGrokAccountId = nil
             settings.resolveSelectedGrokAccount(preferring: signedInGrokAccountIDs())
@@ -1669,6 +2118,23 @@ extension AppStore {
         guard let index = settings.grokAccounts.firstIndex(where: { $0.id == accountId }) else { return }
         let previousHome = settings.grokAccounts[index].grokHomePath
         let standardizedHome = GrokAuth.homeURL(path: homePath)?.path(percentEncoded: false) ?? homePath
+        let incomingToken = GrokAuth.homeURL(path: standardizedHome)
+            .flatMap { GrokAuth.loadAuthFile(home: $0)?.accessToken }
+        if let other = GrokAccountIdentity.matchExisting(
+            accounts: settings.grokAccounts,
+            homePath: standardizedHome,
+            accessToken: incomingToken
+        ), other.id != accountId {
+            GrokAccountIdentity.assignIdentity(
+                email,
+                to: accountId,
+                accounts: &settings.grokAccounts
+            )
+            settings.selectedGrokAccountId = other.id
+            persistSettings()
+            Task { await refreshGrokAccount(other.id, userInitiated: true) }
+            return
+        }
         settings.grokAccounts[index].grokHomePath = standardizedHome
         settings.grokAccounts[index].usesAmbientAuthFile = ambient
         GrokAccountIdentity.assignIdentity(
@@ -1676,7 +2142,10 @@ extension AppStore {
             to: accountId,
             accounts: &settings.grokAccounts
         )
-        if previousHome != standardizedHome {
+        if previousHome != standardizedHome,
+           !settings.grokAccounts.contains(where: {
+               $0.id != accountId && GrokAuth.homesMatch($0.grokHomePath, previousHome)
+           }) {
             GrokAuth.removeManagedHomeIfSafe(previousHome)
         }
         settings.selectedGrokAccountId = accountId
@@ -1713,7 +2182,7 @@ extension AppStore {
 
     func setGrokOAuthToken(_ value: String, for id: UUID) {
         grokTokens[id] = value
-        KeychainStore.set(value, account: .grokAccountOAuthToken(id))
+        schedulePersistSecrets()
     }
 
     @discardableResult
@@ -1754,38 +2223,64 @@ extension AppStore {
         }
     }
 
-    fileprivate func refreshAllGrokAccounts(userInitiated: Bool) async {
+    fileprivate func refreshAllGrokAccounts(userInitiated: Bool, force: Bool = true) async {
         let accounts = settings.grokAccounts
         if accounts.isEmpty {
-            await refreshImplicitGrok(userInitiated: userInitiated)
+            if settings.allowImplicitGrok || settings.previewFixtures {
+                await refreshImplicitGrok(userInitiated: userInitiated)
+            } else {
+                states[.grok] = .signedOut(ProviderKind.grok.signInHint)
+            }
             return
         }
         var jobs: [GrokFetchJob] = []
-        for (index, account) in accounts.enumerated() {
+        var generations: [UUID: Int] = [:]
+        for (index, account) in accounts.enumerated() where account.enabled {
             let current = grokStates[account.id] ?? .idle
+            if !force, !RefreshCoordinator.needsOpenRefresh(current, force: false) {
+                continue
+            }
+            let key = RefreshCoordinator.key(.grok, accountID: account.id)
+            generations[account.id] = beginRefresh(key)
             if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
                 grokStates[account.id] = .loading
             }
             jobs.append(grokJob(for: account, previous: current, variant: index))
         }
+        syncRefreshingFlag()
 
         let results = await RefreshWork.mapConcurrent(jobs) { job in
             await RefreshWork.performGrok(job)
         }
         for item in results {
-            applyGrokResult(item)
+            let key = RefreshCoordinator.key(.grok, accountID: item.id)
+            let generation = generations[item.id] ?? 0
+            applyGrokResult(item, key: key, generation: generation)
+            refreshCoordinator.finish(key, generation: generation)
         }
+        syncRefreshingFlag()
         ensureActiveGrokAccount()
     }
 
     fileprivate func refreshGrokAccount(_ id: UUID, userInitiated: Bool) async {
         guard let account = settings.grokAccounts.first(where: { $0.id == id }) else { return }
         let current = grokStates[id] ?? .idle
+        let key = RefreshCoordinator.key(.grok, accountID: id)
+        let generation = beginRefresh(key)
+        syncRefreshingFlag()
+        defer {
+            refreshCoordinator.finish(key, generation: generation)
+            syncRefreshingFlag()
+        }
         if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
             grokStates[id] = .loading
         }
         let index = settings.grokAccounts.firstIndex(where: { $0.id == id }) ?? 0
-        applyGrokResult(await RefreshWork.performGrok(grokJob(for: account, previous: current, variant: index)))
+        applyGrokResult(
+            await RefreshWork.performGrok(grokJob(for: account, previous: current, variant: index)),
+            key: key,
+            generation: generation
+        )
     }
 
     private func grokJob(for account: GrokAccount, previous: ProviderLoadState, variant: Int) -> GrokFetchJob {
@@ -1802,46 +2297,39 @@ extension AppStore {
         )
     }
 
-    private func applyGrokResult(_ item: AccountFetchResult) {
+    private func applyGrokResult(_ item: AccountFetchResult, key: String, generation: Int) {
+        guard refreshCoordinator.isCurrent(key, generation: generation) else { return }
         switch item.result {
         case .success(let snapshot):
             grokStates[item.id] = .ready(snapshot)
             recordGrokIdentity(snapshot.accountEmail, for: item.id)
         case .failure(let error):
-            grokStates[item.id] = grokFailureState(
+            if error.isCancellation { return }
+            grokStates[item.id] = ProviderLoadState.afterFailure(
                 previous: item.previous,
-                id: item.id,
-                error: error
+                error: error,
+                hasCredentials: hasGrokCredentials(item.id),
+                signInHint: ProviderKind.grok.signInHint
             )
         }
+        recordFetchAttempt(
+            provider: .grok,
+            accountLabel: grokDisplayTitle(for: item.id) ?? item.id.uuidString,
+            state: grokStates[item.id] ?? .idle,
+            startedAt: startedAt(for: key)
+        )
     }
 
-    private func grokFailureState(
-        previous: ProviderLoadState,
-        id: UUID,
-        error: Error
-    ) -> ProviderLoadState {
-        let message: String
-        let authFailure: Bool
-        if let quota = error as? QuotaError {
-            message = quota.errorDescription ?? ProviderKind.grok.signInHint
-            authFailure = quota.isAuthFailure
-        } else {
-            message = error.localizedDescription
-            authFailure = false
+    fileprivate func refreshImplicitGrok(userInitiated: Bool) async {
+        let key = RefreshCoordinator.key(.grok, accountID: Self.implicitGrokID)
+        let generation = beginRefresh(key)
+        syncRefreshingFlag()
+        defer {
+            refreshCoordinator.finish(key, generation: generation)
+            syncRefreshingFlag()
         }
-        if case .ready(let snapshot) = previous {
-            return .ready(snapshot)
-        }
-        if authFailure, !hasGrokCredentials(id) {
-            return .signedOut(message)
-        }
-        return .failure(message)
-    }
-
-    private func refreshImplicitGrok(userInitiated: Bool) async {
         let current = states[.grok] ?? .idle
-        if shouldShowLoading(current) || (userInitiated && current.isSignedOut) {
+        if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
             states[.grok] = .loading
         }
         let item = await RefreshWork.performGrok(
@@ -1856,17 +2344,18 @@ extension AppStore {
                 variant: 0
             )
         )
+        guard refreshCoordinator.isCurrent(key, generation: generation) else { return }
         switch item.result {
         case .success(let snapshot):
             states[.grok] = .ready(snapshot)
         case .failure(let error):
-            if case .ready(let snapshot) = current {
-                states[.grok] = .ready(snapshot)
-            } else if error.isAuthFailure {
-                states[.grok] = .signedOut(error.errorDescription ?? ProviderKind.grok.signInHint)
-            } else {
-                states[.grok] = .failure(error.errorDescription ?? "Something went wrong.")
-            }
+            if error.isCancellation { return }
+            states[.grok] = ProviderLoadState.afterFailure(
+                previous: current,
+                error: error,
+                hasCredentials: GrokAuth.loadAuthFile() != nil,
+                signInHint: ProviderKind.grok.signInHint
+            )
         }
     }
 
@@ -1949,6 +2438,17 @@ struct AccountCardRow: Identifiable, Equatable {
     var hasCredentials: Bool = false
     var recoveryTitle: String = "Retry"
 
+    var showsRecoveryAction: Bool {
+        switch state {
+        case .failure, .stale:
+            return true
+        case .signedOut:
+            return hasCredentials || hasKnownEmail
+        default:
+            return false
+        }
+    }
+
     var hasKnownEmail: Bool {
         if let email, !email.isEmpty { return true }
         return false
@@ -1958,7 +2458,7 @@ struct AccountCardRow: Identifiable, Equatable {
         if let email, !email.isEmpty {
             return email
         }
-        if case .ready(let snapshot) = state, let email = snapshot.accountEmail, !email.isEmpty {
+        if let email = state.snapshot?.accountEmail, !email.isEmpty {
             return email
         }
         if case .signedOut(let message) = state, !hasKnownEmail, !hasCredentials {
@@ -1978,6 +2478,10 @@ struct AccountCardRow: Identifiable, Equatable {
         switch state {
         case .ready(let snapshot):
             return snapshot.windows.isEmpty ? "No usage windows" : nil
+        case .stale(_, let message):
+            let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.count <= 80 { return trimmed }
+            return String(trimmed.prefix(77)) + "…"
         case .loading:
             return "Updating…"
         case .idle:

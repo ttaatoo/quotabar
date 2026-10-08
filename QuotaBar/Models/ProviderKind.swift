@@ -57,7 +57,7 @@ enum ProviderKind: String, CaseIterable, Identifiable, Codable, Hashable, Sendab
     var signInHint: String {
         switch self {
         case .cursor:
-            return CursorAuth.signInHint
+            return "Open Cursor.app and sign in, then Refresh. Leave the optional Settings cookie empty unless you paste a fresh WorkosCursorSessionToken."
         case .chatgpt:
             return "Add a ChatGPT account in Settings to sign in with Codex in your browser."
         case .glm:

@@ -238,11 +238,21 @@ enum ProviderLoadState: Equatable, Sendable {
     case idle
     case loading
     case ready(UsageSnapshot)
+    case stale(UsageSnapshot, message: String)
     case signedOut(String)
     case failure(String)
 
     var snapshot: UsageSnapshot? {
-        if case .ready(let snap) = self { return snap }
+        switch self {
+        case .ready(let snap), .stale(let snap, _):
+            return snap
+        default:
+            return nil
+        }
+    }
+
+    var staleMessage: String? {
+        if case .stale(_, let message) = self { return message }
         return nil
     }
 
@@ -251,9 +261,36 @@ enum ProviderLoadState: Equatable, Sendable {
         return false
     }
 
-    /// User-initiated Retry must leave `.failure` so the card is not a no-op.
+    var hasUsableSnapshot: Bool { snapshot != nil }
+
+    /// User-initiated Retry must leave `.failure` / `.stale` so the card is not a no-op.
     var showsUserInitiatedLoading: Bool {
         if case .ready = self { return false }
         return true
+    }
+
+    static func afterFailure(
+        previous: ProviderLoadState,
+        error: Error,
+        hasCredentials: Bool,
+        signInHint: String
+    ) -> ProviderLoadState {
+        let quota: QuotaError
+        if let typed = error as? QuotaError {
+            quota = typed
+        } else {
+            quota = .network(error.localizedDescription)
+        }
+        if quota.isCancellation {
+            return previous
+        }
+        let message = quota.errorDescription ?? signInHint
+        if let snapshot = previous.snapshot, quota.shouldPreservePriorSnapshot {
+            return .stale(snapshot, message: message)
+        }
+        if quota.isAuthFailure, !hasCredentials {
+            return .signedOut(message)
+        }
+        return .failure(message)
     }
 }

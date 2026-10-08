@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 enum ChatGPTClient {
     private static let sessionCookieName = "__Secure-next-auth.session-token"
@@ -41,7 +44,7 @@ enum ChatGPTClient {
         if let cookie {
             do {
                 let identity = try await fetchSession(cookie: cookie)
-                if !identitiesMatch(identity.email, expectedEmail) {
+                if !ChatGPTAccountIdentity.emailsCompatible(identity.email, expectedEmail) {
                     cookieUnauthorized = true
                     lastError = QuotaError.schema(
                         "Session cookie belongs to \(identity.email ?? "another account"), not \(expectedEmail ?? "this account")."
@@ -83,7 +86,7 @@ enum ChatGPTClient {
             triedCodexAuth = true
             do {
                 let tokens = try await CodexCLIAuth.resolve(home: scopedHome)
-                if !identitiesMatch(tokens.email, expectedEmail) {
+                if !ChatGPTAccountIdentity.emailsCompatible(tokens.email, expectedEmail) {
                     lastError = QuotaError.schema(
                         "Codex auth.json belongs to \(tokens.email ?? "another account"), not \(expectedEmail ?? "this account")."
                     )
@@ -91,7 +94,6 @@ enum ChatGPTClient {
                     let used = try await fetchWithCodexTokens(
                         tokens,
                         home: scopedHome,
-                        cookieIdentity: cookieIdentity,
                         expectedEmail: expectedEmail,
                         now: now
                     )
@@ -113,12 +115,18 @@ enum ChatGPTClient {
             }
         }
 
-        let fallbackToken = cookieIdentity?.accessToken ?? codexTokens?.accessToken
-        let fallbackCookie = cookieIdentity == nil ? nil : cookie
-        let fallbackAccountId = cookieIdentity?.accountId ?? codexTokens?.accountId
-        let fallbackEmail = cookieIdentity?.email ?? codexTokens?.email
-        var fallbackPlan = cookieIdentity?.planName ?? codexTokens?.planName
-        var fallbackExpires = cookieIdentity?.planExpiresAt
+        // One credential chain only — never cookie token + Codex email (or the reverse).
+        let fallback = exclusiveFallback(
+            cookieIdentity: cookieIdentity,
+            cookie: cookie,
+            codexTokens: cookieIdentity == nil ? codexTokens : nil
+        )
+        let fallbackToken = fallback.token
+        let fallbackCookie = fallback.cookie
+        let fallbackAccountId = fallback.accountId
+        var fallbackPlan = fallback.plan
+        var fallbackExpires = fallback.expires
+        let fallbackEmail = fallback.email
 
         if let fallbackToken {
             if fallbackPlan == nil {
@@ -275,7 +283,7 @@ enum ChatGPTClient {
 
     // MARK: - Auth
 
-    private struct Identity {
+    struct Identity {
         var accessToken: String
         var email: String?
         var planName: String?
@@ -293,12 +301,22 @@ enum ChatGPTClient {
                 "Origin": "https://chatgpt.com"
             ]
         )
-        if response.statusCode == 401 || response.statusCode == 403 {
+        switch HTTPClassify.classify(
+            status: response.statusCode,
+            data: data,
+            contentType: response.value(forHTTPHeaderField: "Content-Type")
+        ) {
+        case .unauthorized:
             throw QuotaError.unauthorized(
                 "chatgpt.com rejected the session cookie (\(response.statusCode)). Paste a fresh cookie under Advanced, or Re-login this account in Settings. Other accounts stay."
             )
+        case .checkpoint:
+            throw QuotaError.network(HTTPClassify.checkpointMessage)
+        case .ok:
+            break
+        case .rateLimited, .failure:
+            try HTTPClient.requireOK(response, data: data, host: "chatgpt.com")
         }
-        try HTTPClient.requireOK(response, data: data, host: "chatgpt.com")
         let object = try JSONWalk.object(from: data)
         guard let accessToken = object["accessToken"] as? String, !accessToken.isEmpty else {
             throw QuotaError.unauthorized("chatgpt.com session cookie did not return an access token.")
@@ -408,7 +426,12 @@ enum ChatGPTClient {
                             accountId: attempt.accountId
                         )
                     )
-                    if response.statusCode == 401 || response.statusCode == 403 {
+                    let kind = HTTPClassify.classify(
+                        status: response.statusCode,
+                        data: data,
+                        contentType: response.value(forHTTPHeaderField: "Content-Type")
+                    )
+                    if kind == .unauthorized {
                         lastAuthStatus = response.statusCode
                         lastError = usageAuthError(host: url.host ?? "chatgpt.com", status: response.statusCode)
                         continue
@@ -470,7 +493,12 @@ enum ChatGPTClient {
                             accountId: attempt.accountId
                         )
                     )
-                    if response.statusCode == 401 || response.statusCode == 403 {
+                    let kind = HTTPClassify.classify(
+                        status: response.statusCode,
+                        data: data,
+                        contentType: response.value(forHTTPHeaderField: "Content-Type")
+                    )
+                    if kind == .unauthorized {
                         lastError = usageAuthError(host: url.host ?? "chatgpt.com", status: response.statusCode)
                         continue
                     }
@@ -861,7 +889,6 @@ enum ChatGPTClient {
     private static func fetchWithCodexTokens(
         _ tokens: CodexCLIAuth.Tokens,
         home: URL?,
-        cookieIdentity: Identity?,
         expectedEmail: String?,
         now: Date
     ) async throws -> CodexUsageResult {
@@ -871,14 +898,14 @@ enum ChatGPTClient {
                 accessToken: current.accessToken,
                 cookie: nil,
                 accountId: current.accountId,
-                email: current.email ?? cookieIdentity?.email,
-                planName: current.planName ?? cookieIdentity?.planName,
+                email: current.email,
+                planName: current.planName,
                 now: now
             ) {
                 return .snapshot(try validatedSnapshot(
                     snapshot,
                     expectedEmail: expectedEmail,
-                    planExpiresAt: cookieIdentity?.planExpiresAt
+                    planExpiresAt: nil
                 ))
             }
             return .emptyJSON
@@ -888,7 +915,7 @@ enum ChatGPTClient {
             } catch {
                 return .failed(error, attempted: tokens)
             }
-            guard identitiesMatch(current.email, expectedEmail) else {
+            guard ChatGPTAccountIdentity.emailsCompatible(current.email, expectedEmail) else {
                 return .failed(
                     QuotaError.schema(
                         "Codex auth.json belongs to \(current.email ?? "another account"), not \(expectedEmail ?? "this account")."
@@ -901,14 +928,14 @@ enum ChatGPTClient {
                     accessToken: current.accessToken,
                     cookie: nil,
                     accountId: current.accountId,
-                    email: current.email ?? cookieIdentity?.email,
-                    planName: current.planName ?? cookieIdentity?.planName,
+                    email: current.email,
+                    planName: current.planName,
                     now: now
                 ) {
                     return .snapshot(try validatedSnapshot(
                         snapshot,
                         expectedEmail: expectedEmail,
-                        planExpiresAt: cookieIdentity?.planExpiresAt
+                        planExpiresAt: nil
                     ))
                 }
                 return .emptyJSON
@@ -918,6 +945,35 @@ enum ChatGPTClient {
         } catch {
             return .failed(error, attempted: current)
         }
+    }
+
+    /// Cookie session and Codex home are alternate chains, never a mix of both.
+    static func exclusiveFallback(
+        cookieIdentity: Identity?,
+        cookie: String?,
+        codexTokens: CodexCLIAuth.Tokens?
+    ) -> (token: String?, cookie: String?, accountId: String?, email: String?, plan: String?, expires: Date?) {
+        if let cookieIdentity {
+            return (
+                cookieIdentity.accessToken,
+                cookie,
+                cookieIdentity.accountId,
+                cookieIdentity.email,
+                cookieIdentity.planName,
+                cookieIdentity.planExpiresAt
+            )
+        }
+        if let codexTokens {
+            return (
+                codexTokens.accessToken,
+                nil,
+                codexTokens.accountId,
+                codexTokens.email,
+                codexTokens.planName,
+                nil
+            )
+        }
+        return (nil, nil, nil, nil, nil, nil)
     }
 
     /// Cookie + ChatGPT-Account-Id first, then drop the fields that commonly 401 a second account.
@@ -988,13 +1044,9 @@ enum ChatGPTClient {
 
     // MARK: - Identity helpers
 
-    /// When both sides have an email, they must be the same account.
-    /// Missing email on either side is not a mismatch (session payloads omit it).
+    /// Both sides must have a usable email. A missing email is not a match.
     static func identitiesMatch(_ lhs: String?, _ rhs: String?) -> Bool {
-        guard let left = CodexCLIAuth.usableEmail(lhs),
-              let right = CodexCLIAuth.usableEmail(rhs)
-        else { return true }
-        return left.caseInsensitiveCompare(right) == .orderedSame
+        ChatGPTAccountIdentity.identitiesMatch(lhs, rhs)
     }
 
     private static func validatedSnapshot(
@@ -1002,7 +1054,7 @@ enum ChatGPTClient {
         expectedEmail: String?,
         planExpiresAt: Date? = nil
     ) throws -> UsageSnapshot {
-        guard identitiesMatch(snapshot.accountEmail, expectedEmail) else {
+        guard ChatGPTAccountIdentity.emailsCompatible(snapshot.accountEmail, expectedEmail) else {
             throw QuotaError.schema(
                 "Usage response was for \(snapshot.accountEmail ?? "another account"), not \(expectedEmail ?? "this account")."
             )

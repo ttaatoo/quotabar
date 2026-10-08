@@ -372,6 +372,32 @@ final class GrokAccountTests: XCTestCase {
         )
     }
 
+    func testSameTokenDifferentHomeDoesNotDeleteTheOldAuthFile() throws {
+        let homeA = scratch.appendingPathComponent("merge-a", isDirectory: true)
+        let homeB = scratch.appendingPathComponent("merge-b", isDirectory: true)
+        let token = jwt(sub: "shared-session")
+        try writeAuth(home: homeA, token: token, email: "same@example.com")
+        try writeAuth(home: homeB, token: token, email: "same@example.com")
+        var accounts = [
+            GrokAccount(
+                id: UUID(),
+                label: "Grok",
+                grokHomePath: homeA.path(percentEncoded: false)
+            )
+        ]
+        _ = GrokAccountIdentity.upsertFromHome(
+            accounts: &accounts,
+            homePath: homeB.path(percentEncoded: false),
+            email: "same@example.com",
+            ambient: false,
+            accessToken: token,
+            nextLabel: "Grok 2"
+        )
+        XCTAssertEqual(accounts.count, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: homeA.appendingPathComponent("auth.json").path))
+        XCTAssertTrue(GrokAuth.homesMatch(accounts[0].grokHomePath, homeB.path))
+    }
+
     private func jwt(sub: String, email: String? = nil, name: String? = nil, exp: Date? = nil) -> String {
         func encode(_ object: [String: Any]) -> String {
             let data = try! JSONSerialization.data(withJSONObject: object)

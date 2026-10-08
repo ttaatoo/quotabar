@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 enum QuotaError: LocalizedError, Equatable, Sendable {
     case notSignedIn(String)
@@ -7,6 +10,8 @@ enum QuotaError: LocalizedError, Equatable, Sendable {
     case schema(String)
     case network(String)
     case noUsableQuota(String)
+    /// Overlapped refresh or URLSession cancellation. Not a timeout and not a user-facing failure.
+    case cancelled
 
     var errorDescription: String? {
         switch self {
@@ -18,6 +23,8 @@ enum QuotaError: LocalizedError, Equatable, Sendable {
             return message
         case .http(let code, let message):
             return "HTTP \(code): \(message)"
+        case .cancelled:
+            return "Cancelled."
         }
     }
 
@@ -30,5 +37,30 @@ enum QuotaError: LocalizedError, Equatable, Sendable {
         default:
             return false
         }
+    }
+
+    var isCancellation: Bool {
+        if case .cancelled = self { return true }
+        return false
+    }
+
+    /// Keep last meters only for transport / checkpoint failures — never auth, schema, HTTP, or cancellation.
+    var shouldPreservePriorSnapshot: Bool {
+        if case .network = self { return true }
+        return false
+    }
+
+    /// Maps transport and cancellation errors without depending on Cursor or SQLite.
+    static func captured(_ error: Error) -> QuotaError {
+        if let quota = error as? QuotaError {
+            return quota
+        }
+        if error is CancellationError {
+            return .cancelled
+        }
+        if let urlError = error as? URLError, urlError.code == .cancelled {
+            return .cancelled
+        }
+        return .network(error.localizedDescription)
     }
 }

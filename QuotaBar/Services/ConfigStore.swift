@@ -1,16 +1,66 @@
 import Foundation
 
+enum ConfigLoadKind: Equatable {
+    case missing
+    case decoded
+    case corrupt
+}
+
+struct ConfigLoad {
+    var settings: AppSettings
+    var kind: ConfigLoadKind
+}
+
 enum ConfigStore {
+    /// Tests point this at a temp file. Production leaves it nil.
+    static var configURLOverride: URL?
+
+    static let corruptConfigMessage =
+        "config.json is damaged and was not overwritten. QuotaBar is using temporary defaults and did not change Keychain secrets. Fix or replace the file, then relaunch."
+
     static var configURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        if let configURLOverride { return configURLOverride }
+        return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config/quotabar/config.json")
     }
 
-    static func load() -> AppSettings {
+    static func shouldPersist(_ kind: ConfigLoadKind) -> Bool {
+        kind != .corrupt
+    }
+
+    /// Writes settings only when the on-disk file was readable. A corrupt file is left untouched.
+    @discardableResult
+    static func saveIfAllowed(_ settings: AppSettings, kind: ConfigLoadKind) throws -> Bool {
+        guard shouldPersist(kind) else { return false }
+        try save(settings)
+        return true
+    }
+
+    /// Orphan Keychain cleanup is safe only after a real decode. A missing file
+    /// and a corrupt file both lack a trustworthy account list.
+    static func shouldReconcileKeychain(_ kind: ConfigLoadKind) -> Bool {
+        kind == .decoded
+    }
+
+    static func classify(data: Data?) -> ConfigLoadKind {
+        guard let data else { return .missing }
+        guard !data.isEmpty else { return .corrupt }
+        return (try? JSONDecoder().decode(ConfigFile.self, from: data)) == nil ? .corrupt : .decoded
+    }
+
+    static func load() -> ConfigLoad {
+        let data = try? Data(contentsOf: configURL)
+        let kind = classify(data: data)
+        if kind == .corrupt {
+            QuotaBarLog.configError(corruptConfigMessage)
+            return ConfigLoad(settings: .default, kind: .corrupt)
+        }
+
         var settings = AppSettings.default
         var shouldRewrite = false
         var hadGrokAccountsKey = false
-        if let data = try? Data(contentsOf: configURL),
+        if kind == .decoded,
+           let data,
            let file = try? JSONDecoder().decode(ConfigFile.self, from: data) {
             settings = file.settings
             migrateSecrets(from: file)
@@ -28,7 +78,7 @@ enum ConfigStore {
         let beforeSanitize = settings
         settings.sanitize()
         if shouldRewrite || settings != beforeSanitize {
-            save(settings)
+            try? save(settings)
         }
         if configFileHasChatGPTAccounts() {
             let superseded = settings.chatgptAccounts.contains { account in
@@ -36,34 +86,32 @@ enum ConfigStore {
                     || KeychainStore.get(.chatgptAccountJSON(account.id)) != nil
             }
             if superseded {
+                QuotaBarLog.keychainInfo("Removing legacy unscoped chatgpt cookie/json after per-account secrets exist")
                 KeychainStore.delete(.chatgptCookie)
                 KeychainStore.delete(.chatgptJSON)
             }
         }
         if grokAccountsSupersedeLegacyToken(settings) {
+            QuotaBarLog.keychainInfo("Removing legacy unscoped grok.oauth-token after a per-account secret exists")
             KeychainStore.delete(.grokOAuthToken)
         }
-        return settings
+        return ConfigLoad(settings: settings, kind: kind)
     }
 
-    static func save(_ settings: AppSettings) {
+    static func save(_ settings: AppSettings) throws {
         var cleaned = settings
         cleaned.sanitize()
         let file = ConfigFile(settings: cleaned)
         let directory = configURL.deletingLastPathComponent()
-        do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(file)
-            try data.write(to: configURL, options: [.atomic])
-            try FileManager.default.setAttributes(
-                [.posixPermissions: 0o600],
-                ofItemAtPath: configURL.path
-            )
-        } catch {
-            // Settings still live in memory / Keychain; a config write failure is not fatal.
-        }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(file)
+        try data.write(to: configURL, options: [.atomic])
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: configURL.path
+        )
     }
 
     static func readLegacyGLMKey() -> String? {
@@ -208,6 +256,9 @@ private struct ConfigFile: Codable {
     var didIntroduceOpenCodeGo: Bool?
     var grokAccounts: [GrokAccount]?
     var selectedGrokAccountId: UUID?
+    var allowImplicitChatGPT: Bool?
+    var allowImplicitGrok: Bool?
+    var allowImplicitOpenCodeGo: Bool?
 
     /// Legacy / imported secrets. Written as null after migration.
     var glmApiKey: String?
@@ -231,6 +282,9 @@ private struct ConfigFile: Codable {
         didIntroduceOpenCodeGo = settings.didIntroduceOpenCodeGo
         grokAccounts = settings.grokAccounts
         selectedGrokAccountId = settings.selectedGrokAccountId
+        allowImplicitChatGPT = settings.allowImplicitChatGPT
+        allowImplicitGrok = settings.allowImplicitGrok
+        allowImplicitOpenCodeGo = settings.allowImplicitOpenCodeGo
         glmApiKey = nil
         cursorCookie = nil
         chatgptCookie = nil
@@ -257,6 +311,10 @@ private struct ConfigFile: Codable {
         value.didIntroduceOpenCodeGo = didIntroduceOpenCodeGo ?? false
         if let grokAccounts { value.grokAccounts = grokAccounts }
         if let selectedGrokAccountId { value.selectedGrokAccountId = selectedGrokAccountId }
+        // Missing key = existing installs keep first-run implicit ambient cards.
+        if let allowImplicitChatGPT { value.allowImplicitChatGPT = allowImplicitChatGPT }
+        if let allowImplicitGrok { value.allowImplicitGrok = allowImplicitGrok }
+        if let allowImplicitOpenCodeGo { value.allowImplicitOpenCodeGo = allowImplicitOpenCodeGo }
         return value
     }
 }

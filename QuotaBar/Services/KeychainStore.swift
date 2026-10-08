@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(Security)
 import Security
+#endif
 
 enum KeychainAccount: Hashable {
     case cursorCookie
@@ -43,6 +45,7 @@ enum KeychainAccount: Hashable {
 enum KeychainStore {
     private static let service = "app.quotabar.QuotaBar"
 
+#if canImport(Security)
     static func set(_ value: String?, account: KeychainAccount) {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !trimmed.isEmpty else {
@@ -63,13 +66,19 @@ enum KeychainStore {
         if updated == errSecItemNotFound {
             query[kSecValueData as String] = data
             query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-            SecItemAdd(query as CFDictionary, nil)
+            let added = SecItemAdd(query as CFDictionary, nil)
+            if added != errSecSuccess {
+                QuotaBarLog.keychainError("Keychain add failed for \(account.rawValue): \(added)")
+            }
             return
         }
         delete(account)
         query[kSecValueData as String] = data
         query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(query as CFDictionary, nil)
+        let added = SecItemAdd(query as CFDictionary, nil)
+        if added != errSecSuccess {
+            QuotaBarLog.keychainError("Keychain replace-add failed for \(account.rawValue): \(added)")
+        }
     }
 
     static func get(_ account: KeychainAccount) -> String? {
@@ -88,11 +97,108 @@ enum KeychainStore {
         SecItemDelete(baseQuery(account) as CFDictionary)
     }
 
+    /// Drop per-UUID secrets that no longer belong to a saved account.
+    static func reconcile(
+        chatgptIDs: [UUID],
+        grokIDs: [UUID],
+        opencodeIDs: [UUID]
+    ) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll
+        ]
+        var out: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &out)
+        guard status == errSecSuccess, let items = out as? [[String: Any]] else { return }
+
+        let stored = items.compactMap { $0[kSecAttrAccount as String] as? String }
+        for account in orphanedAccountNames(
+            stored: stored,
+            chatgptIDs: chatgptIDs,
+            grokIDs: grokIDs,
+            opencodeIDs: opencodeIDs
+        ) {
+            QuotaBarLog.keychainInfo(
+                "Reconcile deleting orphan \(redactedAccountName(account)) (account name only, service \(service))"
+            )
+            let deleteQuery: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: account
+            ]
+            SecItemDelete(deleteQuery as CFDictionary)
+        }
+    }
+
     private static func baseQuery(_ account: KeychainAccount) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account.rawValue
         ]
+    }
+#else
+    static func set(_ value: String?, account: KeychainAccount) {}
+    static func get(_ account: KeychainAccount) -> String? { nil }
+    static func delete(_ account: KeychainAccount) {}
+    static func reconcile(chatgptIDs: [UUID], grokIDs: [UUID], opencodeIDs: [UUID]) {}
+#endif
+
+    /// Names reconcile may delete. Legacy unscoped keys are never included.
+    /// A UUID is kept only when it belongs to an account of the provider in the key prefix.
+    /// The caller must already have limited `stored` to this app's keychain service.
+    static func orphanedAccountNames(
+        stored: [String],
+        chatgptIDs: [UUID],
+        grokIDs: [UUID],
+        opencodeIDs: [UUID]
+    ) -> [String] {
+        let chatgpt = Set(chatgptIDs)
+        let grok = Set(grokIDs)
+        let opencode = Set(opencodeIDs)
+        return stored.filter { name in
+            guard let parsed = parseScopedAccount(name) else { return false }
+            switch parsed.provider {
+            case .chatgpt:
+                return !chatgpt.contains(parsed.id)
+            case .grok:
+                return !grok.contains(parsed.id)
+            case .opencodeGo:
+                return !opencode.contains(parsed.id)
+            }
+        }
+    }
+
+    static func redactedAccountName(_ account: String) -> String {
+        guard let parsed = parseScopedAccount(account) else { return "unscoped" }
+        let prefix = account.dropLast(parsed.id.uuidString.count)
+        return prefix + String(parsed.id.uuidString.prefix(8)) + "…"
+    }
+
+    static func isUUIDScoped(_ account: String) -> Bool {
+        parseScopedAccount(account) != nil
+    }
+
+    private enum ScopedProvider {
+        case chatgpt
+        case grok
+        case opencodeGo
+    }
+
+    private static func parseScopedAccount(_ account: String) -> (provider: ScopedProvider, id: UUID)? {
+        let prefixes: [(String, ScopedProvider)] = [
+            ("chatgpt.cookie.", .chatgpt),
+            ("chatgpt.json.", .chatgpt),
+            ("opencodeGo.apiKey.", .opencodeGo),
+            ("grok.oauth-token.", .grok)
+        ]
+        for (prefix, provider) in prefixes where account.hasPrefix(prefix) {
+            let suffix = String(account.dropFirst(prefix.count))
+            guard let id = UUID(uuidString: suffix) else { return nil }
+            return (provider, id)
+        }
+        return nil
     }
 }

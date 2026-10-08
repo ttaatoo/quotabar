@@ -1,10 +1,9 @@
 import Foundation
 
 /// Reads Codex CLI `auth.json`. QuotaBar never starts a ChatGPT OAuth app.
-/// For a home we already have, an expired access token is refreshed with the
-/// same public Codex client + `refresh_token` the CLI uses, then written back
-/// (refresh tokens rotate). That is required for a second managed Codex home:
-/// the CLI does not poll those files, so a stale `access_token` 401s forever.
+/// For a managed home we already have, an expired access token is refreshed
+/// with the same public Codex client + `refresh_token` the CLI uses, then
+/// written back (refresh tokens rotate). Ambient `~/.codex` is never written.
 enum CodexCLIAuth {
     static let oauthClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
     static let defaultRefreshURL = URL(string: "https://auth.openai.com/oauth/token")!
@@ -43,6 +42,18 @@ enum CodexCLIAuth {
 
     static func isAmbientHome(_ url: URL) -> Bool {
         standardizedPath(url) == standardizedPath(defaultHomeURL())
+    }
+
+    static func isAmbientHomePath(_ path: String?) -> Bool {
+        guard let url = homeURL(path: path) else { return false }
+        return isAmbientHome(url)
+    }
+
+    static func homesMatch(_ lhs: String?, _ rhs: String?) -> Bool {
+        guard let left = homeURL(path: lhs), let right = homeURL(path: rhs) else {
+            return false
+        }
+        return standardizedPath(left) == standardizedPath(right)
     }
 
     static func read(home: URL? = nil) -> Tokens? {
@@ -131,7 +142,12 @@ enum CodexCLIAuth {
             ],
             timeout: RefreshWork.oauthTimeout
         )
-        if response.statusCode == 401 || response.statusCode == 403 {
+        let kind = HTTPClassify.classify(
+            status: response.statusCode,
+            data: data,
+            contentType: response.value(forHTTPHeaderField: "Content-Type")
+        )
+        if kind == .unauthorized {
             let object = (try? JSONWalk.object(from: data)) ?? [:]
             let code = JSONWalk.string(object, keys: ["error", "code"]) ?? ""
             let suffix = code.isEmpty ? "" : " (\(code))"
@@ -158,10 +174,17 @@ enum CodexCLIAuth {
         if next.accountId == nil { next.accountId = identity.accountId }
         if next.planName == nil { next.planName = identity.planName }
 
+        try persistRefreshedTokens(home: home, tokens: next)
+        return next
+    }
+
+    /// Writes a rotated token only when `home` is under QuotaBar's managed Codex directory.
+    /// Ambient `~/.codex` and any other path are left untouched.
+    static func persistRefreshedTokens(home: URL, tokens: Tokens) throws {
         persistLock.lock()
         defer { persistLock.unlock() }
-        try writeRefreshed(home: home, tokens: next)
-        return next
+        guard isManagedHome(home) else { return }
+        try writeRefreshed(home: home, tokens: tokens)
     }
 
     private static func refreshURL() -> URL {

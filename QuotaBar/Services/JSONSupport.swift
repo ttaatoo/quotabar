@@ -11,7 +11,8 @@ enum JSONNumber {
         case let value as String:
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
                 .replacingOccurrences(of: "%", with: "")
-            return Double(trimmed)
+            guard let parsed = Double(trimmed), parsed.isFinite else { return nil }
+            return parsed
         default:
             return nil
         }
@@ -114,6 +115,20 @@ enum JWT {
 /// Display identity for a provider card. Prefers a real email, then a
 /// username / handle, then a short account id. Never invents an address.
 enum AccountIdentity {
+    /// Top-level / `user` / `account` / `data` only. Does not walk the whole tree.
+    static func fromShallowJSON(_ object: [String: Any]) -> String? {
+        if let email = CodexCLIAuth.email(from: object) {
+            return email
+        }
+        for key in ["user", "account", "data", "profile"] {
+            if let nested = object[key] as? [String: Any],
+               let email = CodexCLIAuth.email(from: nested) {
+                return email
+            }
+        }
+        return nil
+    }
+
     static func fromJSON(_ value: Any) -> String? {
         for (_, object) in JSONWalk.dictionaries(in: value) {
             if let email = CodexCLIAuth.email(from: object) {
@@ -182,12 +197,12 @@ enum AccountIdentity {
 
 enum Percent {
     static func remaining(used: Double) -> Double {
-        max(0, 100 - used)
+        clamp(100 - used)
     }
 
     static func clamp(_ value: Double) -> Double {
         guard value.isFinite else { return 0 }
-        return value
+        return min(100, max(0, value))
     }
 
     static func fromRemainingUsed(remaining: Double?, used: Double?, limit: Double?) -> (remaining: Double, used: Double)? {

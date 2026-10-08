@@ -21,7 +21,10 @@ struct OverallListView: View {
                             now: store.now,
                             treatIdleAsUpdating: store.isRefreshing,
                             reduceMotion: reduceMotion,
-                            onOpen: { store.openOverallRow(row) }
+                            onOpen: { store.openOverallRow(row) },
+                            onRecover: row.card.showsRecoveryAction
+                                ? { store.recoverOverallRow(row) }
+                                : nil
                         )
                     }
                 }
@@ -39,48 +42,37 @@ private struct OverallAccountRowView: View {
     let treatIdleAsUpdating: Bool
     var reduceMotion: Bool = false
     let onOpen: () -> Void
+    var onRecover: (() -> Void)? = nil
 
     @State private var hovering = false
 
     var body: some View {
-        Button(action: onOpen) {
-            HStack(alignment: .center, spacing: 8) {
-                ProviderMark(
-                    provider: row.provider,
-                    size: 14,
-                    tint: Theme.settingsTint(for: row.provider)
-                )
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(row.card.displayTitle(for: row.provider))
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Theme.primary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Text(secondaryText)
-                        .font(.system(size: 10))
-                        .foregroundStyle(Theme.secondary)
-                        .lineLimit(2)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .layoutPriority(1)
-
-                if let window = primaryWindow {
-                    primaryMeter(window)
-                }
+        HStack(alignment: .center, spacing: 8) {
+            rowBody
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onOpen)
+            if let onRecover, row.card.showsRecoveryAction {
+                Button(row.card.recoveryTitle, action: onRecover)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.primary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule(style: .continuous).fill(Color.white.opacity(0.10))
+                    )
             }
-            .padding(Theme.overallRowPadding)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.overallRowRadius, style: .continuous)
-                    .fill(hovering ? Color(red: 0.19, green: 0.19, blue: 0.205) : Theme.elevated)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.overallRowRadius, style: .continuous)
-                    .strokeBorder(hovering ? Color.white.opacity(0.16) : Theme.hairline, lineWidth: 1)
-            )
         }
-        .buttonStyle(.plain)
+        .padding(Theme.overallRowPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.overallRowRadius, style: .continuous)
+                .fill(hovering ? Color(red: 0.19, green: 0.19, blue: 0.205) : Theme.elevated)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.overallRowRadius, style: .continuous)
+                .strokeBorder(hovering ? Color.white.opacity(0.16) : Theme.hairline, lineWidth: 1)
+        )
         .onHover { hovering = $0 }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: hovering)
         .accessibilityLabel([
@@ -91,9 +83,34 @@ private struct OverallAccountRowView: View {
         .accessibilityHint("Show this account")
     }
 
+    private var rowBody: some View {
+        HStack(alignment: .center, spacing: 8) {
+            ProviderMark(
+                provider: row.provider,
+                size: 14,
+                tint: Theme.settingsTint(for: row.provider)
+            )
+            VStack(alignment: .leading, spacing: 1) {
+                Text(row.card.displayTitle(for: row.provider))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(secondaryText)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.secondary)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
+            if let window = primaryWindow {
+                primaryMeter(window)
+            }
+        }
+    }
+
     private var primaryWindow: UsageWindow? {
-        guard case .ready(let snapshot) = row.card.state else { return nil }
-        return snapshot.tightestWindow
+        return row.card.state.snapshot?.tightestWindow
     }
 
     private var secondaryText: String {

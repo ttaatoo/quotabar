@@ -8,6 +8,7 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
     case glm
     case grok
     case display
+    case diagnostics
     case about
 
     var id: String { rawValue }
@@ -21,6 +22,7 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         case .glm: return "GLM"
         case .grok: return "Grok"
         case .display: return "Display"
+        case .diagnostics: return "Diagnostics"
         case .about: return "About"
         }
     }
@@ -41,6 +43,7 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         case .glm: return ProviderKind.glm.settingsSymbol
         case .grok: return ProviderKind.grok.settingsSymbol
         case .display: return "slider.horizontal.3"
+        case .diagnostics: return "stethoscope"
         case .about: return "info.circle"
         }
     }
@@ -49,7 +52,7 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .providers: return .quota
         case .cursor, .chatgpt, .opencodeGo, .glm, .grok: return .accounts
-        case .display, .about: return .app
+        case .display, .diagnostics, .about: return .app
         }
     }
 

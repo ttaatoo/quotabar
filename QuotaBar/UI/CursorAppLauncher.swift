@@ -7,7 +7,9 @@ enum CursorAppLauncher {
 
     /// Official Mac build is still the Todesktop-wrapped Cursor.app.
     static let bundleIdentifiers = [
-        "com.todesktop.230313mzl4w4u92"
+        "com.todesktop.230313mzl4w4u92",
+        "com.anysphere.cursor",
+        "com.anysphere.Cursor"
     ]
 
     enum Outcome: Equatable {

@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 enum HTTPClient {
     static let browserUserAgent =
@@ -20,7 +23,9 @@ enum HTTPClient {
         config.httpCookieAcceptPolicy = .never
         config.urlCache = nil
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        #if os(macOS) || os(iOS)
         config.waitsForConnectivity = false
+        #endif
         config.timeoutIntervalForRequest = RefreshWork.httpTimeout
         config.timeoutIntervalForResource = RefreshWork.providerTimeout
         let delegate = RedirectDelegate(followRedirects: followRedirects)
@@ -116,10 +121,8 @@ enum HTTPClient {
                 throw QuotaError.network("Unexpected response from \(url.host ?? url.absoluteString).")
             }
             return (raw.data, http)
-        } catch let error as QuotaError {
-            throw error
         } catch {
-            throw QuotaError.network(error.localizedDescription)
+            throw RefreshWork.quotaError(error)
         }
     }
 
@@ -130,20 +133,7 @@ enum HTTPClient {
     }
 
     static func requireOK(_ response: HTTPURLResponse, data: Data, host: String) throws {
-        if response.statusCode == 401 {
-            throw QuotaError.unauthorized("\(host) rejected the session (\(response.statusCode)).")
-        }
-        if response.statusCode == 403 {
-            if CursorHTTP.isVercelCheckpoint(data: data) {
-                throw QuotaError.network(CursorHTTP.checkpointMessage)
-            }
-            throw QuotaError.unauthorized("\(host) rejected the session (\(response.statusCode)).")
-        }
-        guard (200...299).contains(response.statusCode) else {
-            let snippet = String(data: data.prefix(180), encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            throw QuotaError.http(response.statusCode, snippet.isEmpty ? host : snippet)
-        }
+        try HTTPClassify.requireOK(response, data: data, host: host)
     }
 }
 

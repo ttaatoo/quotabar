@@ -530,66 +530,32 @@ enum CursorHTTP {
     }
 
     static func classify(status: Int, data: Data, contentType: String?) -> Kind {
-        if isCheckpoint(status: status, data: data, contentType: contentType) {
-            return .checkpoint
-        }
-        if isUnauthenticated(status: status, data: data, contentType: contentType) {
-            return .unauthorized
-        }
-        if (200...299).contains(status) {
+        switch HTTPClassify.classify(status: status, data: data, contentType: contentType) {
+        case .ok:
             return .ok
+        case .unauthorized:
+            return .unauthorized
+        case .checkpoint:
+            return .checkpoint
+        case .rateLimited, .failure:
+            return .failure
         }
-        return .failure
     }
 
     static func isCheckpoint(status: Int, data: Data, contentType: String?) -> Bool {
-        guard status == 403 else { return false }
-        if isVercelCheckpoint(data: data) { return true }
-        let type = (contentType ?? "").lowercased()
-        if type.contains("text/html") { return true }
-        return looksLikeHTML(data) && !looksLikeJSON(data)
+        HTTPClassify.isCheckpoint(status: status, data: data, contentType: contentType)
     }
 
     static func isVercelCheckpoint(data: Data) -> Bool {
-        let text = String(data: data.prefix(4000), encoding: .utf8)?.lowercased() ?? ""
-        return text.contains("vercel security checkpoint")
-            || text.contains("security checkpoint")
+        HTTPClassify.isVercelCheckpoint(data: data)
     }
 
     static func isUnauthenticated(status: Int, data: Data, contentType: String?) -> Bool {
-        if isCheckpoint(status: status, data: data, contentType: contentType) {
-            return false
-        }
-        if status == 401 {
-            return true
-        }
-        if looksLikeJSON(data) || (contentType ?? "").lowercased().contains("json") {
-            if let object = try? JSONWalk.object(from: data), isUnauthenticatedJSON(object) {
-                return true
-            }
-        }
-        return false
+        HTTPClassify.isUnauthenticated(status: status, data: data, contentType: contentType)
     }
 
     static func isUnauthenticatedJSON(_ object: [String: Any]) -> Bool {
-        if object["error"] as? String == "not_authenticated" {
-            return true
-        }
-        if object["shouldLogout"] as? Bool == true {
-            return true
-        }
-        let haystack = [
-            JSONWalk.string(object, keys: ["error", "code", "message"]) ?? ""
-        ].joined(separator: " ").lowercased()
-        let markers = [
-            "not_authenticated",
-            "not authenticated",
-            "unauthenticated",
-            "unauthorized",
-            "invalid token",
-            "token expired"
-        ]
-        return markers.contains { haystack.contains($0) }
+        HTTPClassify.isUnauthenticatedJSON(object)
     }
 
     static func isCheckpointError(_ error: Error) -> Bool {
@@ -597,17 +563,5 @@ enum CursorHTTP {
             return false
         }
         return message.lowercased().contains("security checkpoint")
-    }
-
-    private static func looksLikeJSON(_ data: Data) -> Bool {
-        guard let text = String(data: data.prefix(256), encoding: .utf8) else { return false }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.first == "{" || trimmed.first == "["
-    }
-
-    private static func looksLikeHTML(_ data: Data) -> Bool {
-        guard let text = String(data: data.prefix(256), encoding: .utf8) else { return false }
-        let lower = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return lower.hasPrefix("<!doctype html") || lower.hasPrefix("<html")
     }
 }

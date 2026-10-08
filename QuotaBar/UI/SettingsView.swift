@@ -30,6 +30,17 @@ struct SettingsView: View {
         }
         .background(Theme.settingsPageFill)
         .frame(minWidth: Theme.settingsMinWidth, minHeight: Theme.settingsMinHeight)
+        .overlay(alignment: .top) {
+            if let error = store.lastConfigSaveError, !error.isEmpty {
+                Text("Couldn’t save settings: \(error)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.warning)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.warning.opacity(0.12))
+            }
+        }
         .preferredColorScheme(.dark)
         .onAppear {
             if !didUnlockSection {
@@ -37,11 +48,14 @@ struct SettingsView: View {
                 didUnlockSection = true
             }
         }
-        .onChange(of: store.cursorCookie) { _, _ in store.persistSecrets() }
-        .onChange(of: store.glmAPIKey) { _, _ in store.persistSecrets() }
-        .onChange(of: store.settings) { _, _ in
+        .onChange(of: store.cursorCookie) { _, _ in store.schedulePersistSecrets() }
+        .onChange(of: store.glmAPIKey) { _, _ in store.schedulePersistSecrets() }
+        .onChange(of: store.settings.pollIntervalSeconds) { _, _ in
             store.persistSettings()
             store.restartPolling()
+        }
+        .onChange(of: store.settings) { _, _ in
+            store.persistSettings()
         }
         .onChange(of: store.settings.previewFixtures) { _, _ in
             Task { await store.refreshAll() }
@@ -160,6 +174,8 @@ struct SettingsView: View {
             grokPane
         case .display:
             displayPane
+        case .diagnostics:
+            diagnosticsPane
         case .about:
             aboutPane
         }
@@ -278,6 +294,14 @@ struct SettingsView: View {
                             SettingsSecondaryButton(title: "Add with session cookie", systemImage: "plus") {
                                 addChatGPTCookieAccount()
                             }
+                            SettingsRow(
+                                title: "Use ~/.codex",
+                                subtitle: "Show an implicit card from ~/.codex/auth.json when no accounts are saved."
+                            ) {
+                                Toggle("Use ~/.codex", isOn: implicitChatGPTBinding)
+                                    .labelsHidden()
+                                    .tint(Theme.settingsAccent)
+                            }
                         }
                         .padding(.horizontal, 12)
                         .padding(.bottom, 10)
@@ -325,6 +349,14 @@ struct SettingsView: View {
                     opencodeAmbientRow
                 }
                 SettingsCaption(text: "This environment key is not stored in Settings. Import copies it into the Keychain. Add account starts a new Keychain row and stops using the environment key until you paste one.")
+                SettingsRow(
+                    title: "Use environment key",
+                    subtitle: "Show an implicit card from OPENCODE_GO_API_KEY / OPENCODE_API_KEY when no accounts are saved."
+                ) {
+                    Toggle("Use environment key", isOn: implicitOpenCodeBinding)
+                        .labelsHidden()
+                        .tint(Theme.settingsAccent)
+                }
             } else {
                 SettingsGroup {
                     SettingsEmptyState(
@@ -335,6 +367,15 @@ struct SettingsView: View {
                         actionTitle: "Add account"
                     ) {
                         addOpenCodeAccount()
+                    }
+                    SettingsInsetHairline()
+                    SettingsRow(
+                        title: "Use environment key",
+                        subtitle: "Show an implicit card from OPENCODE_GO_API_KEY / OPENCODE_API_KEY when no accounts are saved."
+                    ) {
+                        Toggle("Use environment key", isOn: implicitOpenCodeBinding)
+                            .labelsHidden()
+                            .tint(Theme.settingsAccent)
                     }
                 }
             }
@@ -416,6 +457,14 @@ struct SettingsView: View {
                             SettingsSecondaryButton(title: "Add with SuperGrok bearer", systemImage: "plus") {
                                 addGrokAccountFromEmpty()
                             }
+                            SettingsRow(
+                                title: "Use ~/.grok",
+                                subtitle: "Show an implicit card from ~/.grok/auth.json when no accounts are saved."
+                            ) {
+                                Toggle("Use ~/.grok", isOn: implicitGrokBinding)
+                                    .labelsHidden()
+                                    .tint(Theme.settingsAccent)
+                            }
                         }
                         .padding(.horizontal, 12)
                         .padding(.bottom, 10)
@@ -488,6 +537,49 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    private var diagnosticsPane: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            SettingsPaneHeader(
+                title: SettingsSection.diagnostics.paneTitle,
+                subtitle: "Last fetch for each account. No secrets — kind, age, and whether meters were kept."
+            )
+            if store.lastFetchAttempts.isEmpty {
+                SettingsGroup {
+                    SettingsCaption(text: "Refresh once to populate this list. Preview fixtures also record attempts.")
+                        .padding(12)
+                }
+            } else {
+                SettingsGroup {
+                    ForEach(Array(store.lastFetchAttempts.enumerated()), id: \.element.id) { index, attempt in
+                        if index > 0 {
+                            SettingsInsetHairline()
+                        }
+                        SettingsRow(
+                            title: attempt.summary,
+                            subtitle: diagnosticsSubtitle(attempt)
+                        ) {
+                            EmptyView()
+                        }
+                    }
+                }
+            }
+            if store.configLoadKind == .corrupt {
+                SettingsCaption(text: ConfigStore.corruptConfigMessage, tone: .warning)
+            } else if let error = store.lastConfigSaveError, !error.isEmpty {
+                SettingsCaption(text: "Last settings save failed: \(error)", tone: .warning)
+            }
+        }
+    }
+
+    private func diagnosticsSubtitle(_ attempt: FetchAttempt) -> String {
+        let age = TimeFormatting.relativeUpdated(from: attempt.finishedAt, now: store.now)
+        var parts = [age, "\(attempt.durationMs) ms"]
+        if !attempt.message.isEmpty, attempt.kind != "ok" {
+            parts.append(attempt.message)
+        }
+        return parts.joined(separator: " · ")
     }
 
     private var aboutPane: some View {
@@ -793,7 +885,7 @@ struct SettingsView: View {
             return store.cursorEmail == nil
         }
         switch state {
-        case .ready:
+        case .ready, .stale:
             return false
         case .signedOut, .failure:
             return true
@@ -862,7 +954,7 @@ struct SettingsView: View {
         if let identity = store.glmIdentity, !identity.isEmpty {
             return identity
         }
-        if case .ready(let snapshot) = store.states[.glm], let plan = snapshot.planName, !plan.isEmpty {
+        if let plan = store.states[.glm]?.snapshot?.planName, !plan.isEmpty {
             return "GLM \(plan)"
         }
         return "No identity yet"
@@ -969,6 +1061,27 @@ struct SettingsView: View {
         Binding(
             get: { store.settings.enabledProviders.contains(provider) },
             set: { store.setEnabled(provider, enabled: $0) }
+        )
+    }
+
+    private var implicitChatGPTBinding: Binding<Bool> {
+        Binding(
+            get: { store.settings.allowImplicitChatGPT },
+            set: { store.setAllowImplicitChatGPT($0) }
+        )
+    }
+
+    private var implicitGrokBinding: Binding<Bool> {
+        Binding(
+            get: { store.settings.allowImplicitGrok },
+            set: { store.setAllowImplicitGrok($0) }
+        )
+    }
+
+    private var implicitOpenCodeBinding: Binding<Bool> {
+        Binding(
+            get: { store.settings.allowImplicitOpenCodeGo },
+            set: { store.setAllowImplicitOpenCodeGo($0) }
         )
     }
 
