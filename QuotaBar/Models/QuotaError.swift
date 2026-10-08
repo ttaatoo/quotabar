@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 enum QuotaError: LocalizedError, Equatable, Sendable {
     case notSignedIn(String)
@@ -45,5 +48,19 @@ enum QuotaError: LocalizedError, Equatable, Sendable {
     var shouldPreservePriorSnapshot: Bool {
         if case .network = self { return true }
         return false
+    }
+
+    /// Maps transport and cancellation errors without depending on Cursor or SQLite.
+    static func captured(_ error: Error) -> QuotaError {
+        if let quota = error as? QuotaError {
+            return quota
+        }
+        if error is CancellationError {
+            return .cancelled
+        }
+        if let urlError = error as? URLError, urlError.code == .cancelled {
+            return .cancelled
+        }
+        return .network(error.localizedDescription)
     }
 }

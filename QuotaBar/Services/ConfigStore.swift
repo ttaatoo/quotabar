@@ -12,9 +12,28 @@ struct ConfigLoad {
 }
 
 enum ConfigStore {
+    /// Tests point this at a temp file. Production leaves it nil.
+    static var configURLOverride: URL?
+
+    static let corruptConfigMessage =
+        "config.json is damaged and was not overwritten. QuotaBar is using temporary defaults and did not change Keychain secrets. Fix or replace the file, then relaunch."
+
     static var configURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        if let configURLOverride { return configURLOverride }
+        return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config/quotabar/config.json")
+    }
+
+    static func shouldPersist(_ kind: ConfigLoadKind) -> Bool {
+        kind != .corrupt
+    }
+
+    /// Writes settings only when the on-disk file was readable. A corrupt file is left untouched.
+    @discardableResult
+    static func saveIfAllowed(_ settings: AppSettings, kind: ConfigLoadKind) throws -> Bool {
+        guard shouldPersist(kind) else { return false }
+        try save(settings)
+        return true
     }
 
     /// Orphan Keychain cleanup is safe only after a real decode. A missing file
@@ -33,7 +52,7 @@ enum ConfigStore {
         let data = try? Data(contentsOf: configURL)
         let kind = classify(data: data)
         if kind == .corrupt {
-            QuotaBarLog.configError("config.json is present but could not be decoded. Leaving the file and Keychain secrets unchanged.")
+            QuotaBarLog.configError(corruptConfigMessage)
             return ConfigLoad(settings: .default, kind: .corrupt)
         }
 
@@ -67,11 +86,13 @@ enum ConfigStore {
                     || KeychainStore.get(.chatgptAccountJSON(account.id)) != nil
             }
             if superseded {
+                QuotaBarLog.keychainInfo("Removing legacy unscoped chatgpt cookie/json after per-account secrets exist")
                 KeychainStore.delete(.chatgptCookie)
                 KeychainStore.delete(.chatgptJSON)
             }
         }
         if grokAccountsSupersedeLegacyToken(settings) {
+            QuotaBarLog.keychainInfo("Removing legacy unscoped grok.oauth-token after a per-account secret exists")
             KeychainStore.delete(.grokOAuthToken)
         }
         return ConfigLoad(settings: settings, kind: kind)

@@ -27,6 +27,12 @@ enum QuotaBarLog {
         keychainLog.error("\(message, privacy: .public)")
         #endif
     }
+
+    static func keychainInfo(_ message: String) {
+        #if canImport(os)
+        keychainLog.info("\(message, privacy: .public)")
+        #endif
+    }
 }
 
 struct FetchAttempt: Equatable, Identifiable, Sendable {
@@ -48,9 +54,12 @@ struct FetchAttempt: Equatable, Identifiable, Sendable {
     static func redactedMessage(_ message: String) -> String {
         let lower = message.lowercased()
         if lower.contains("bearer ")
-            || message.contains("eyJ")
             || lower.contains("session-token")
             || lower.contains("refresh_token") {
+            return "response omitted"
+        }
+        // A bare "eyJ" shows up in ordinary text. Only a dotted JWT shape is a token.
+        if message.range(of: #"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"#, options: .regularExpression) != nil {
             return "response omitted"
         }
         if message.count > 180 {

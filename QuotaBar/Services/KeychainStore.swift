@@ -103,7 +103,7 @@ enum KeychainStore {
         grokIDs: [UUID],
         opencodeIDs: [UUID]
     ) {
-        var query: [String: Any] = [
+        let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecReturnAttributes as String: true,
@@ -113,30 +113,16 @@ enum KeychainStore {
         let status = SecItemCopyMatching(query as CFDictionary, &out)
         guard status == errSecSuccess, let items = out as? [[String: Any]] else { return }
 
-        var keep: Set<String> = [
-            KeychainAccount.cursorCookie.rawValue,
-            KeychainAccount.cursorRefreshedSession.rawValue,
-            KeychainAccount.chatgptCookie.rawValue,
-            KeychainAccount.chatgptJSON.rawValue,
-            KeychainAccount.glmAPIKey.rawValue,
-            KeychainAccount.grokOAuthToken.rawValue
-        ]
-        for id in chatgptIDs {
-            keep.insert(KeychainAccount.chatgptAccountCookie(id).rawValue)
-            keep.insert(KeychainAccount.chatgptAccountJSON(id).rawValue)
-        }
-        for id in grokIDs {
-            keep.insert(KeychainAccount.grokAccountOAuthToken(id).rawValue)
-        }
-        for id in opencodeIDs {
-            keep.insert(KeychainAccount.opencodeGoAPIKey(id).rawValue)
-        }
-
-        for item in items {
-            guard let account = item[kSecAttrAccount as String] as? String,
-                  isUUIDScoped(account),
-                  !keep.contains(account)
-            else { continue }
+        let stored = items.compactMap { $0[kSecAttrAccount as String] as? String }
+        for account in orphanedAccountNames(
+            stored: stored,
+            chatgptIDs: chatgptIDs,
+            grokIDs: grokIDs,
+            opencodeIDs: opencodeIDs
+        ) {
+            QuotaBarLog.keychainInfo(
+                "Reconcile deleting orphan \(redactedAccountName(account)) (account name only, service \(service))"
+            )
             let deleteQuery: [String: Any] = [
                 kSecClass as String: kSecClassGenericPassword,
                 kSecAttrService as String: service,
@@ -160,17 +146,59 @@ enum KeychainStore {
     static func reconcile(chatgptIDs: [UUID], grokIDs: [UUID], opencodeIDs: [UUID]) {}
 #endif
 
-    static func isUUIDScoped(_ account: String) -> Bool {
-        let prefixes = [
-            "chatgpt.cookie.",
-            "chatgpt.json.",
-            "opencodeGo.apiKey.",
-            "grok.oauth-token."
-        ]
-        for prefix in prefixes where account.hasPrefix(prefix) {
-            let suffix = String(account.dropFirst(prefix.count))
-            return UUID(uuidString: suffix) != nil
+    /// Names reconcile may delete. Legacy unscoped keys are never included.
+    /// A UUID is kept only when it belongs to an account of the provider in the key prefix.
+    /// The caller must already have limited `stored` to this app's keychain service.
+    static func orphanedAccountNames(
+        stored: [String],
+        chatgptIDs: [UUID],
+        grokIDs: [UUID],
+        opencodeIDs: [UUID]
+    ) -> [String] {
+        let chatgpt = Set(chatgptIDs)
+        let grok = Set(grokIDs)
+        let opencode = Set(opencodeIDs)
+        return stored.filter { name in
+            guard let parsed = parseScopedAccount(name) else { return false }
+            switch parsed.provider {
+            case .chatgpt:
+                return !chatgpt.contains(parsed.id)
+            case .grok:
+                return !grok.contains(parsed.id)
+            case .opencodeGo:
+                return !opencode.contains(parsed.id)
+            }
         }
-        return false
+    }
+
+    static func redactedAccountName(_ account: String) -> String {
+        guard let parsed = parseScopedAccount(account) else { return "unscoped" }
+        let prefix = account.dropLast(parsed.id.uuidString.count)
+        return prefix + String(parsed.id.uuidString.prefix(8)) + "…"
+    }
+
+    static func isUUIDScoped(_ account: String) -> Bool {
+        parseScopedAccount(account) != nil
+    }
+
+    private enum ScopedProvider {
+        case chatgpt
+        case grok
+        case opencodeGo
+    }
+
+    private static func parseScopedAccount(_ account: String) -> (provider: ScopedProvider, id: UUID)? {
+        let prefixes: [(String, ScopedProvider)] = [
+            ("chatgpt.cookie.", .chatgpt),
+            ("chatgpt.json.", .chatgpt),
+            ("opencodeGo.apiKey.", .opencodeGo),
+            ("grok.oauth-token.", .grok)
+        ]
+        for (prefix, provider) in prefixes where account.hasPrefix(prefix) {
+            let suffix = String(account.dropFirst(prefix.count))
+            guard let id = UUID(uuidString: suffix) else { return nil }
+            return (provider, id)
+        }
+        return nil
     }
 }

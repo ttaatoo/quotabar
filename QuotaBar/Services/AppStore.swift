@@ -14,6 +14,7 @@ final class AppStore: ObservableObject {
     @Published var isRefreshing = false
     @Published var lastFetchAttempts: [FetchAttempt] = []
     @Published var lastConfigSaveError: String?
+    @Published private(set) var configLoadKind: ConfigLoadKind = .missing
     private let refreshCoordinator = RefreshCoordinator()
     private var consecutivePollFailures = 0
     private var lastScheduledPollAt: Date?
@@ -31,6 +32,10 @@ final class AppStore: ObservableObject {
 
     private init() {
         let loaded = ConfigStore.load()
+        configLoadKind = loaded.kind
+        if loaded.kind == .corrupt {
+            lastConfigSaveError = ConfigStore.corruptConfigMessage
+        }
         var settingsValue = loaded.settings
         settingsValue.launchAtLogin = LaunchAtLogin.isEnabled
         settings = settingsValue
@@ -494,7 +499,12 @@ final class AppStore: ObservableObject {
     @discardableResult
     private func beginRefresh(_ key: String) -> Int {
         markRefreshKeyStarted(key)
-        return refreshCoordinator.begin(key)
+        let generation = refreshCoordinator.begin(key)
+        if refreshStartedAt.count > 64 {
+            let live = refreshCoordinator.inFlightKeys
+            refreshStartedAt = refreshStartedAt.filter { live.contains($0.key) }
+        }
+        return generation
     }
 
     func updateSettings(_ mutate: (inout AppSettings) -> Void) {
@@ -605,10 +615,19 @@ final class AppStore: ObservableObject {
     }
 
     func persistSettings() {
+        guard ConfigStore.shouldPersist(configLoadKind) else {
+            lastConfigSaveError = ConfigStore.corruptConfigMessage
+            QuotaBarLog.configError(ConfigStore.corruptConfigMessage)
+            return
+        }
         settings.sanitize()
         do {
-            try ConfigStore.save(settings)
-            lastConfigSaveError = nil
+            let wrote = try ConfigStore.saveIfAllowed(settings, kind: configLoadKind)
+            if wrote {
+                lastConfigSaveError = nil
+            } else {
+                lastConfigSaveError = ConfigStore.corruptConfigMessage
+            }
         } catch {
             lastConfigSaveError = error.localizedDescription
             QuotaBarLog.configError("Failed to save settings: \(error.localizedDescription)")
@@ -992,7 +1011,7 @@ final class AppStore: ObservableObject {
             markRefreshStarted(provider, userInitiated: userInitiated)
         }
         // Fan-out off MainActor so ChatGPT / Go cannot stall Cursor / GLM / Grok.
-        await RefreshWork.mapConcurrent(providers) { provider in
+        _ = await RefreshWork.mapConcurrent(providers) { provider in
             await AppStore.shared.refresh(provider, userInitiated: userInitiated, force: true)
         }
         if recordPollOutcome {
@@ -1333,7 +1352,7 @@ final class AppStore: ObservableObject {
             chatgptStates[item.id] = .ready(snapshot)
             recordChatGPTEmail(snapshot.accountEmail, for: item.id)
         case .failure(let error):
-            if let quota = error as? QuotaError, quota.isCancellation { return }
+            if error.isCancellation { return }
             chatgptStates[item.id] = ProviderLoadState.afterFailure(
                 previous: item.previous,
                 error: error,
@@ -1820,7 +1839,7 @@ extension AppStore {
             opencodeGoStates[item.id] = .ready(snapshot)
             recordOpenCodeGoEmail(snapshot.accountEmail, for: item.id)
         case .failure(let error):
-            if let quota = error as? QuotaError, quota.isCancellation { return }
+            if error.isCancellation { return }
             opencodeGoStates[item.id] = ProviderLoadState.afterFailure(
                 previous: item.previous,
                 error: error,
@@ -2285,7 +2304,7 @@ extension AppStore {
             grokStates[item.id] = .ready(snapshot)
             recordGrokIdentity(snapshot.accountEmail, for: item.id)
         case .failure(let error):
-            if let quota = error as? QuotaError, quota.isCancellation { return }
+            if error.isCancellation { return }
             grokStates[item.id] = ProviderLoadState.afterFailure(
                 previous: item.previous,
                 error: error,

@@ -3,16 +3,17 @@ import Foundation
 /// Per-key refresh generations so a stale in-flight job cannot publish.
 final class RefreshCoordinator: @unchecked Sendable {
     private let lock = NSLock()
+    private var clock = 0
     private var generations: [String: Int] = [:]
     private var inFlight: Set<String> = []
 
     func begin(_ key: String) -> Int {
         lock.lock()
         defer { lock.unlock() }
-        let next = (generations[key] ?? 0) + 1
-        generations[key] = next
+        clock += 1
+        generations[key] = clock
         inFlight.insert(key)
-        return next
+        return clock
     }
 
     func finish(_ key: String, generation: Int) {
@@ -21,6 +22,22 @@ final class RefreshCoordinator: @unchecked Sendable {
         if generations[key] == generation {
             inFlight.remove(key)
         }
+        pruneIdleKeysLocked()
+    }
+
+    /// Drop finished keys once the map is large. Generations are process-wide and
+    /// never reused, so a late callback cannot match a new `begin`.
+    private func pruneIdleKeysLocked() {
+        guard generations.count > 64 else { return }
+        for key in generations.keys where !inFlight.contains(key) {
+            generations.removeValue(forKey: key)
+        }
+    }
+
+    var inFlightKeys: Set<String> {
+        lock.lock()
+        defer { lock.unlock() }
+        return inFlight
     }
 
     func isCurrent(_ key: String, generation: Int) -> Bool {

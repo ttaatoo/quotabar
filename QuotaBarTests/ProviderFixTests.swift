@@ -73,6 +73,76 @@ final class ProviderFixTests: XCTestCase {
         XCTAssertFalse(ConfigStore.shouldReconcileKeychain(.missing))
         XCTAssertFalse(ConfigStore.shouldReconcileKeychain(.corrupt))
         XCTAssertTrue(ConfigStore.shouldReconcileKeychain(.decoded))
+        XCTAssertFalse(ConfigStore.shouldPersist(.corrupt))
+    }
+
+    func testCorruptConfigSurvivesPersistAndSecondLoad() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("qb-corrupt-config-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let url = root.appendingPathComponent("config.json")
+        let original = Data("{\"chatgptAccounts\":".utf8)
+        try original.write(to: url)
+        let previous = ConfigStore.configURLOverride
+        ConfigStore.configURLOverride = url
+        defer {
+            ConfigStore.configURLOverride = previous
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        let loaded = ConfigStore.load()
+        XCTAssertEqual(loaded.kind, .corrupt)
+        XCTAssertFalse(ConfigStore.shouldReconcileKeychain(loaded.kind))
+        let wrote = try ConfigStore.saveIfAllowed(AppSettings.default, kind: loaded.kind)
+        XCTAssertFalse(wrote)
+        XCTAssertEqual(try Data(contentsOf: url), original)
+
+        let again = ConfigStore.load()
+        XCTAssertEqual(again.kind, .corrupt)
+        XCTAssertEqual(try Data(contentsOf: url), original)
+        XCTAssertFalse(ConfigStore.shouldReconcileKeychain(again.kind))
+
+        let kept = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
+        let other = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
+        let stored = [
+            "chatgpt.cookie.\(kept.uuidString)",
+            "chatgpt.cookie.\(other.uuidString)",
+            "grok.oauth-token.\(kept.uuidString)",
+            "cursor.cookie",
+            "chatgpt.cookie",
+            "chatgpt.usage-json",
+            "grok.oauth-token",
+            "glm.api-key",
+            "cursor.refreshed-session"
+        ]
+        XCTAssertEqual(
+            Set(KeychainStore.orphanedAccountNames(
+                stored: stored,
+                chatgptIDs: [kept],
+                grokIDs: [],
+                opencodeIDs: []
+            )),
+            Set([
+                "chatgpt.cookie.\(other.uuidString)",
+                "grok.oauth-token.\(kept.uuidString)"
+            ])
+        )
+        XCTAssertTrue(
+            KeychainStore.orphanedAccountNames(
+                stored: ["cursor.cookie", "grok.oauth-token", "chatgpt.usage-json"],
+                chatgptIDs: [],
+                grokIDs: [],
+                opencodeIDs: []
+            ).isEmpty
+        )
+    }
+
+    func testRedactionKeepsOrdinaryEyJText() {
+        XCTAssertEqual(FetchAttempt.redactedMessage("provider said eyJ in a sentence"), "provider said eyJ in a sentence")
+        XCTAssertEqual(
+            FetchAttempt.redactedMessage("token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.sig"),
+            "response omitted"
+        )
     }
 
     func testCodexRefreshSkipsUnmanagedHome() throws {

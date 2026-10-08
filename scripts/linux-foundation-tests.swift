@@ -5,6 +5,10 @@ import FoundationNetworking
 
 /// Runs the non-AppKit contracts against the real QuotaBar types.
 /// XCTest is not linked here; macOS still runs QuotaBarTests.
+///
+/// Compile with `scripts/linux-foundation-check.sh`. That list does not include
+/// CursorAuth, CursorClient, FixtureLoader, or RefreshWork, so Linux does not
+/// need the SQLite3 module. `QuotaError.captured` is the cancellation mapper.
 
 func check(_ condition: Bool, _ message: String) {
     if !condition {
@@ -95,7 +99,7 @@ if case .stale = staleNext {} else {
 }
 let cancelled = ProviderLoadState.afterFailure(
     previous: ready,
-    error: RefreshWork.quotaError(URLError(.cancelled)),
+    error: QuotaError.captured(URLError(.cancelled)),
     hasCredentials: true,
     signInHint: "sign in"
 )
@@ -189,6 +193,37 @@ let unmanagedAuth = unmanaged.appendingPathComponent("auth.json")
 try original.write(to: unmanagedAuth)
 try CodexCLIAuth.persistRefreshedTokens(home: unmanaged, tokens: CodexCLIAuth.Tokens(accessToken: "new"))
 checkEqual(try Data(contentsOf: unmanagedAuth), original, "unmanaged auth.json unchanged")
+
+let corruptURL = root.appendingPathComponent("config.json")
+let corruptBytes = Data("{\"chatgptAccounts\":".utf8)
+try corruptBytes.write(to: corruptURL)
+let previousOverride = ConfigStore.configURLOverride
+ConfigStore.configURLOverride = corruptURL
+let loaded = ConfigStore.load()
+checkEqual(loaded.kind, .corrupt, "truncated file is corrupt")
+let wrote = try ConfigStore.saveIfAllowed(AppSettings.default, kind: loaded.kind)
+check(!wrote, "corrupt persist does not write")
+checkEqual(try Data(contentsOf: corruptURL), corruptBytes, "corrupt bytes survive persist")
+let again = ConfigStore.load()
+checkEqual(again.kind, .corrupt, "second load still corrupt")
+check(!ConfigStore.shouldReconcileKeychain(again.kind), "second load does not reconcile")
+ConfigStore.configURLOverride = previousOverride
+let kept = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
+let storedNames = [
+    "chatgpt.cookie.\(kept.uuidString)",
+    "cursor.cookie",
+    "grok.oauth-token",
+    "chatgpt.usage-json"
+]
+check(
+    KeychainStore.orphanedAccountNames(
+        stored: storedNames,
+        chatgptIDs: [kept],
+        grokIDs: [],
+        opencodeIDs: []
+    ).isEmpty,
+    "owned and legacy keys are not orphans"
+)
 
 try? FileManager.default.removeItem(at: root)
 }

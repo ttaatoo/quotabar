@@ -565,7 +565,9 @@ struct SettingsView: View {
                     }
                 }
             }
-            if let error = store.lastConfigSaveError, !error.isEmpty {
+            if store.configLoadKind == .corrupt {
+                SettingsCaption(text: ConfigStore.corruptConfigMessage, tone: .warning)
+            } else if let error = store.lastConfigSaveError, !error.isEmpty {
                 SettingsCaption(text: "Last settings save failed: \(error)", tone: .warning)
             }
         }

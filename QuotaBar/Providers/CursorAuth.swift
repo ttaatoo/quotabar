@@ -3,8 +3,7 @@ import SQLite3
 
 enum CursorAuth {
     /// Popover / Settings hint. Cookie paste is Advanced-only.
-    static let signInHint =
-        "Open Cursor.app and sign in, then Refresh. Leave the optional Settings cookie empty unless you paste a fresh WorkosCursorSessionToken."
+    static var signInHint: String { ProviderKind.cursor.signInHint }
 
     static let notSignedInMessage =
         "No Cursor session found. Open Cursor.app and sign in, then Refresh."
