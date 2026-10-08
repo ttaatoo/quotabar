@@ -18,6 +18,7 @@
 		00000000000000000000000E /* TimeFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000000D /* TimeFormatting.swift */; };
 		000000000000000000000010 /* JSONSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000000F /* JSONSupport.swift */; };
 		000000000000000000000012 /* HTTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000011 /* HTTPClient.swift */; };
+		000000000000000000000171 /* HTTPClassify.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000170 /* HTTPClassify.swift */; };
 		000000000000000000000014 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000013 /* KeychainStore.swift */; };
 		000000000000000000000016 /* ConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000015 /* ConfigStore.swift */; };
 		000000000000000000000018 /* LaunchAtLogin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000017 /* LaunchAtLogin.swift */; };
@@ -58,6 +59,7 @@
 		00000000000000000000004D /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 00000000000000000000004C /* libsqlite3.tbd */; };
 		000000000000000000000201 /* CursorClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000200 /* CursorClientTests.swift */; };
 		000000000000000000000221 /* GrokAccountTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000220 /* GrokAccountTests.swift */; };
+		000000000000000000000231 /* HTTPClassifyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000230 /* HTTPClassifyTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -72,6 +74,7 @@
 		00000000000000000000000D /* TimeFormatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeFormatting.swift; sourceTree = "<group>"; };
 		00000000000000000000000F /* JSONSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONSupport.swift; sourceTree = "<group>"; };
 		000000000000000000000011 /* HTTPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPClient.swift; sourceTree = "<group>"; };
+		000000000000000000000170 /* HTTPClassify.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPClassify.swift; sourceTree = "<group>"; };
 		000000000000000000000013 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		000000000000000000000015 /* ConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigStore.swift; sourceTree = "<group>"; };
 		000000000000000000000017 /* LaunchAtLogin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLogin.swift; sourceTree = "<group>"; };
@@ -115,6 +118,7 @@
 		00000000000000000000004C /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
 		000000000000000000000200 /* CursorClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorClientTests.swift; sourceTree = "<group>"; };
 		000000000000000000000220 /* GrokAccountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokAccountTests.swift; sourceTree = "<group>"; };
+		000000000000000000000230 /* HTTPClassifyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPClassifyTests.swift; sourceTree = "<group>"; };
 		000000000000000000000206 /* QuotaBarTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = QuotaBarTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -182,6 +186,7 @@
 				00000000000000000000000D /* TimeFormatting.swift */,
 				00000000000000000000000F /* JSONSupport.swift */,
 				000000000000000000000011 /* HTTPClient.swift */,
+				000000000000000000000170 /* HTTPClassify.swift */,
 				000000000000000000000013 /* KeychainStore.swift */,
 				000000000000000000000015 /* ConfigStore.swift */,
 				000000000000000000000017 /* LaunchAtLogin.swift */,
@@ -266,6 +271,7 @@
 			children = (
 				000000000000000000000200 /* CursorClientTests.swift */,
 				000000000000000000000220 /* GrokAccountTests.swift */,
+				000000000000000000000230 /* HTTPClassifyTests.swift */,
 			);
 			path = QuotaBarTests;
 			sourceTree = "<group>";
@@ -396,6 +402,7 @@
 				00000000000000000000000E /* TimeFormatting.swift in Sources */,
 				000000000000000000000010 /* JSONSupport.swift in Sources */,
 				000000000000000000000012 /* HTTPClient.swift in Sources */,
+				000000000000000000000171 /* HTTPClassify.swift in Sources */,
 				000000000000000000000014 /* KeychainStore.swift in Sources */,
 				000000000000000000000016 /* ConfigStore.swift in Sources */,
 				000000000000000000000018 /* LaunchAtLogin.swift in Sources */,
@@ -436,6 +443,7 @@
 			files = (
 				000000000000000000000201 /* CursorClientTests.swift in Sources */,
 				000000000000000000000221 /* GrokAccountTests.swift in Sources */,
+				000000000000000000000231 /* HTTPClassifyTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

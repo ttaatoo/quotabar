@@ -293,12 +293,22 @@ enum ChatGPTClient {
                 "Origin": "https://chatgpt.com"
             ]
         )
-        if response.statusCode == 401 || response.statusCode == 403 {
+        switch HTTPClassify.classify(
+            status: response.statusCode,
+            data: data,
+            contentType: response.value(forHTTPHeaderField: "Content-Type")
+        ) {
+        case .unauthorized:
             throw QuotaError.unauthorized(
                 "chatgpt.com rejected the session cookie (\(response.statusCode)). Paste a fresh cookie under Advanced, or Re-login this account in Settings. Other accounts stay."
             )
+        case .checkpoint:
+            throw QuotaError.network(HTTPClassify.checkpointMessage)
+        case .ok:
+            break
+        case .rateLimited, .failure:
+            try HTTPClient.requireOK(response, data: data, host: "chatgpt.com")
         }
-        try HTTPClient.requireOK(response, data: data, host: "chatgpt.com")
         let object = try JSONWalk.object(from: data)
         guard let accessToken = object["accessToken"] as? String, !accessToken.isEmpty else {
             throw QuotaError.unauthorized("chatgpt.com session cookie did not return an access token.")
@@ -408,7 +418,12 @@ enum ChatGPTClient {
                             accountId: attempt.accountId
                         )
                     )
-                    if response.statusCode == 401 || response.statusCode == 403 {
+                    let kind = HTTPClassify.classify(
+                        status: response.statusCode,
+                        data: data,
+                        contentType: response.value(forHTTPHeaderField: "Content-Type")
+                    )
+                    if kind == .unauthorized {
                         lastAuthStatus = response.statusCode
                         lastError = usageAuthError(host: url.host ?? "chatgpt.com", status: response.statusCode)
                         continue
@@ -470,7 +485,12 @@ enum ChatGPTClient {
                             accountId: attempt.accountId
                         )
                     )
-                    if response.statusCode == 401 || response.statusCode == 403 {
+                    let kind = HTTPClassify.classify(
+                        status: response.statusCode,
+                        data: data,
+                        contentType: response.value(forHTTPHeaderField: "Content-Type")
+                    )
+                    if kind == .unauthorized {
                         lastError = usageAuthError(host: url.host ?? "chatgpt.com", status: response.statusCode)
                         continue
                     }

@@ -18,8 +18,8 @@ enum OpenCodeGoClient {
         if response.statusCode == 401 {
             throw QuotaError.unauthorized("OpenCode rejected this API key (401).")
         }
-        if response.statusCode == 403 {
-            throw noSubscriptionError(data: data)
+        if response.statusCode == 403, isEntitlementDenial(data: data) {
+            throw QuotaError.noUsableQuota("This API key has no OpenCode Go subscription.")
         }
         try HTTPClient.requireOK(response, data: data, host: usageURL.host ?? "opencode.ai")
         let object = try JSONWalk.object(from: data)
@@ -110,13 +110,9 @@ enum OpenCodeGoClient {
         )
     }
 
-    private static func noSubscriptionError(data: Data) -> QuotaError {
-        if let object = try? JSONWalk.object(from: data) {
-            let name = JSONWalk.string(object, keys: ["name", "error", "code", "type"]) ?? ""
-            if name.localizedCaseInsensitiveContains("entitlement") {
-                return QuotaError.noUsableQuota("This API key has no OpenCode Go subscription.")
-            }
-        }
-        return QuotaError.noUsableQuota("This API key has no OpenCode Go subscription.")
+    static func isEntitlementDenial(data: Data) -> Bool {
+        guard let object = try? JSONWalk.object(from: data) else { return false }
+        let name = JSONWalk.string(object, keys: ["name", "error", "code", "type"]) ?? ""
+        return name.localizedCaseInsensitiveContains("entitlement")
     }
 }

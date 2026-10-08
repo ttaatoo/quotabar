@@ -130,20 +130,7 @@ enum HTTPClient {
     }
 
     static func requireOK(_ response: HTTPURLResponse, data: Data, host: String) throws {
-        if response.statusCode == 401 {
-            throw QuotaError.unauthorized("\(host) rejected the session (\(response.statusCode)).")
-        }
-        if response.statusCode == 403 {
-            if CursorHTTP.isVercelCheckpoint(data: data) {
-                throw QuotaError.network(CursorHTTP.checkpointMessage)
-            }
-            throw QuotaError.unauthorized("\(host) rejected the session (\(response.statusCode)).")
-        }
-        guard (200...299).contains(response.statusCode) else {
-            let snippet = String(data: data.prefix(180), encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            throw QuotaError.http(response.statusCode, snippet.isEmpty ? host : snippet)
-        }
+        try HTTPClassify.requireOK(response, data: data, host: host)
     }
 }
 

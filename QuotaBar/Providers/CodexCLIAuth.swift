@@ -131,7 +131,12 @@ enum CodexCLIAuth {
             ],
             timeout: RefreshWork.oauthTimeout
         )
-        if response.statusCode == 401 || response.statusCode == 403 {
+        let kind = HTTPClassify.classify(
+            status: response.statusCode,
+            data: data,
+            contentType: response.value(forHTTPHeaderField: "Content-Type")
+        )
+        if kind == .unauthorized {
             let object = (try? JSONWalk.object(from: data)) ?? [:]
             let code = JSONWalk.string(object, keys: ["error", "code"]) ?? ""
             let suffix = code.isEmpty ? "" : " (\(code))"
