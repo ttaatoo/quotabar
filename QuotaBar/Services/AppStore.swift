@@ -305,6 +305,7 @@ final class AppStore: ObservableObject {
                 )
             }
         }
+        guard settings.allowImplicitChatGPT || settings.previewFixtures else { return [] }
         let implicit = states[.chatgpt] ?? .idle
         switch implicit {
         case .ready, .stale, .loading, .failure:
@@ -515,6 +516,27 @@ final class AppStore: ObservableObject {
         ConfigStore.save(settings)
     }
 
+    func setAllowImplicitChatGPT(_ enabled: Bool) {
+        guard settings.allowImplicitChatGPT != enabled else { return }
+        settings.allowImplicitChatGPT = enabled
+        persistSettings()
+        Task { await refresh(.chatgpt) }
+    }
+
+    func setAllowImplicitGrok(_ enabled: Bool) {
+        guard settings.allowImplicitGrok != enabled else { return }
+        settings.allowImplicitGrok = enabled
+        persistSettings()
+        Task { await refresh(.grok) }
+    }
+
+    func setAllowImplicitOpenCodeGo(_ enabled: Bool) {
+        guard settings.allowImplicitOpenCodeGo != enabled else { return }
+        settings.allowImplicitOpenCodeGo = enabled
+        persistSettings()
+        Task { await refresh(.opencodeGo) }
+    }
+
     func nextChatGPTLabel() -> String {
         let existing = Set(settings.chatgptAccounts.map(\.label))
         if !existing.contains("ChatGPT") { return "ChatGPT" }
@@ -541,23 +563,17 @@ final class AppStore: ObservableObject {
         return id
     }
 
-    /// Create-on-success (or refresh an existing email's cookie). Label is the
-    /// session email when present; otherwise ChatGPT / ChatGPT 2. Rename stays
-    /// user-editable and is not overwritten on a later sign-in of the same email.
+    /// Create-on-success, or refresh the row that already holds this cookie.
+    /// Email is a label only — two sessions with the same mailbox stay two rows.
     @discardableResult
     func upsertChatGPTAccount(cookie: String, email: String?) -> UUID {
         let trimmedCookie = ChatGPTClient.normalizeCookie(cookie)
             ?? cookie.trimmingCharacters(in: .whitespacesAndNewlines)
-        let emailValue: String?
-        if let email = email?.trimmingCharacters(in: .whitespacesAndNewlines), !email.isEmpty {
-            emailValue = email
-        } else {
-            emailValue = nil
-        }
+        let emailValue = CodexCLIAuth.usableEmail(email)
 
-        if let emailValue,
+        if !trimmedCookie.isEmpty,
            let existing = settings.chatgptAccounts.first(where: {
-               $0.email?.caseInsensitiveCompare(emailValue) == .orderedSame
+               chatgptCookies[$0.id] == trimmedCookie
            }) {
             setChatGPTCookie(trimmedCookie, for: existing.id)
             recordChatGPTEmail(emailValue, for: existing.id)
@@ -569,9 +585,7 @@ final class AppStore: ObservableObject {
 
         let label = emailValue ?? nextChatGPTLabel()
         let id = addChatGPTAccount(label: label)
-        if let emailValue, let index = settings.chatgptAccounts.firstIndex(where: { $0.id == id }) {
-            settings.chatgptAccounts[index].email = emailValue
-        }
+        recordChatGPTEmail(emailValue, for: id)
         settings.selectedChatGPTAccountId = id
         setChatGPTCookie(trimmedCookie, for: id)
         persistSettings()
@@ -595,11 +609,31 @@ final class AppStore: ObservableObject {
         guard let index = settings.chatgptAccounts.firstIndex(where: { $0.id == accountId }) else { return }
         let previousHome = settings.chatgptAccounts[index].codexHomePath
         let standardizedHome = CodexCLIAuth.homeURL(path: homePath)?.path(percentEncoded: false) ?? homePath
+        let incomingToken = CodexCLIAuth.homeURL(path: standardizedHome)
+            .flatMap { CodexCLIAuth.read(home: $0)?.accessToken }
+        if let other = ChatGPTAccountIdentity.matchExisting(
+            accounts: settings.chatgptAccounts,
+            homePath: standardizedHome,
+            accessToken: incomingToken,
+            excluding: accountId
+        ) {
+            ChatGPTAccountIdentity.assignIdentity(
+                email,
+                to: accountId,
+                accounts: &settings.chatgptAccounts
+            )
+            settings.selectedChatGPTAccountId = other.id
+            persistSettings()
+            Task { await refreshChatGPTAccount(other.id, userInitiated: true) }
+            return
+        }
         settings.chatgptAccounts[index].codexHomePath = standardizedHome
         settings.chatgptAccounts[index].usesAmbientCodexHome = ambient
-        if let trimmed = CodexCLIAuth.usableEmail(email) {
-            settings.chatgptAccounts[index].email = trimmed
-        }
+        ChatGPTAccountIdentity.assignIdentity(
+            email,
+            to: accountId,
+            accounts: &settings.chatgptAccounts
+        )
         if previousHome != standardizedHome {
             CodexCLIAuth.removeManagedHomeIfSafe(previousHome)
         }
@@ -619,6 +653,9 @@ final class AppStore: ObservableObject {
         KeychainStore.delete(.chatgptAccountJSON(id))
         if !ambient {
             CodexCLIAuth.removeManagedHomeIfSafe(homePath)
+        }
+        if settings.chatgptAccounts.isEmpty {
+            settings.allowImplicitChatGPT = false
         }
         if settings.selectedChatGPTAccountId == id {
             settings.selectedChatGPTAccountId = nil
@@ -645,34 +682,21 @@ final class AppStore: ObservableObject {
         email: String?,
         ambient: Bool
     ) -> UUID? {
-        let trimmedEmail = CodexCLIAuth.usableEmail(email)
         let standardizedHome = CodexCLIAuth.homeURL(path: homePath)?.path(percentEncoded: false) ?? homePath
-
-        if let trimmedEmail,
-           let existing = settings.chatgptAccounts.first(where: {
-               $0.email?.caseInsensitiveCompare(trimmedEmail) == .orderedSame
-           }) {
-            if let index = settings.chatgptAccounts.firstIndex(where: { $0.id == existing.id }) {
-                let previousHome = settings.chatgptAccounts[index].codexHomePath
-                settings.chatgptAccounts[index].email = trimmedEmail
-                settings.chatgptAccounts[index].codexHomePath = standardizedHome
-                settings.chatgptAccounts[index].usesAmbientCodexHome = ambient
-                if previousHome != standardizedHome {
-                    CodexCLIAuth.removeManagedHomeIfSafe(previousHome)
-                }
-            }
-            settings.selectedChatGPTAccountId = existing.id
-            persistSettings()
-            Task { await refreshChatGPTAccount(existing.id, userInitiated: true) }
-            return existing.id
-        }
-
-        let label = trimmedEmail ?? nextChatGPTLabel()
-        let id = addChatGPTAccount(label: label)
-        if let index = settings.chatgptAccounts.firstIndex(where: { $0.id == id }) {
-            settings.chatgptAccounts[index].email = trimmedEmail
-            settings.chatgptAccounts[index].codexHomePath = standardizedHome
-            settings.chatgptAccounts[index].usesAmbientCodexHome = ambient
+        let tokens = CodexCLIAuth.homeURL(path: standardizedHome).flatMap { CodexCLIAuth.read(home: $0) }
+        let existed = Set(settings.chatgptAccounts.map(\.id))
+        let id = ChatGPTAccountIdentity.upsertFromHome(
+            accounts: &settings.chatgptAccounts,
+            homePath: standardizedHome,
+            email: email ?? tokens?.email,
+            ambient: ambient,
+            accessToken: tokens?.accessToken,
+            nextLabel: nextChatGPTLabel()
+        )
+        if !existed.contains(id) {
+            chatgptCookies[id] = chatgptCookies[id] ?? ""
+            chatgptJSONs[id] = chatgptJSONs[id] ?? ""
+            chatgptStates[id] = .idle
         }
         settings.selectedChatGPTAccountId = id
         persistSettings()
@@ -909,8 +933,10 @@ final class AppStore: ObservableObject {
         if accounts.isEmpty {
             if settings.previewFixtures {
                 await refreshChatGPTPreviewFallback(userInitiated: userInitiated)
-            } else {
+            } else if settings.allowImplicitChatGPT {
                 await refreshImplicitChatGPT(userInitiated: userInitiated)
+            } else {
+                states[.chatgpt] = .signedOut(ProviderKind.chatgpt.signInHint)
             }
             return
         }
@@ -1079,12 +1105,16 @@ final class AppStore: ObservableObject {
     }
 
     private func recordChatGPTEmail(_ email: String?, for id: UUID) {
-        let trimmed = CodexCLIAuth.usableEmail(email)
-        guard let trimmed else { return }
-        guard let index = settings.chatgptAccounts.firstIndex(where: { $0.id == id }) else { return }
-        guard settings.chatgptAccounts[index].email != trimmed else { return }
-        settings.chatgptAccounts[index].email = trimmed
-        persistSettings()
+        guard settings.chatgptAccounts.contains(where: { $0.id == id }) else { return }
+        let before = settings.chatgptAccounts.first(where: { $0.id == id })?.email
+        ChatGPTAccountIdentity.assignIdentity(
+            email,
+            to: id,
+            accounts: &settings.chatgptAccounts
+        )
+        if settings.chatgptAccounts.first(where: { $0.id == id })?.email != before {
+            persistSettings()
+        }
     }
 
     private func loadChatGPTSecrets() {
@@ -1147,6 +1177,7 @@ extension AppStore {
                 )
             }
         }
+        guard settings.allowImplicitOpenCodeGo || settings.previewFixtures else { return [] }
         let implicit = states[.opencodeGo] ?? .idle
         switch implicit {
         case .ready, .stale, .loading, .failure:
@@ -1166,7 +1197,7 @@ extension AppStore {
 
     /// True when Settings should show the env/implicit OpenCode row instead of an empty state.
     var hasAmbientOpenCodeGoSource: Bool {
-        guard settings.opencodeGoAccounts.isEmpty else { return false }
+        guard settings.opencodeGoAccounts.isEmpty, settings.allowImplicitOpenCodeGo else { return false }
         if OpenCodeGoClient.resolveToken(explicit: nil) != nil { return true }
         if settings.previewFixtures { return true }
         switch states[.opencodeGo] ?? .idle {
@@ -1323,6 +1354,9 @@ extension AppStore {
         opencodeGoAPIKeys[id] = nil
         opencodeGoStates[id] = nil
         KeychainStore.delete(.opencodeGoAPIKey(id))
+        if settings.opencodeGoAccounts.isEmpty {
+            settings.allowImplicitOpenCodeGo = false
+        }
         if settings.selectedOpenCodeGoAccountId == id {
             settings.selectedOpenCodeGoAccountId = nil
             settings.resolveSelectedOpenCodeGoAccount(preferring: signedInOpenCodeGoAccountIDs())
@@ -1351,7 +1385,11 @@ extension AppStore {
     fileprivate func refreshAllOpenCodeGoAccounts(userInitiated: Bool) async {
         let accounts = settings.opencodeGoAccounts
         if accounts.isEmpty {
-            await refreshImplicitOpenCodeGo(userInitiated: userInitiated)
+            if settings.allowImplicitOpenCodeGo || settings.previewFixtures {
+                await refreshImplicitOpenCodeGo(userInitiated: userInitiated)
+            } else {
+                states[.opencodeGo] = .signedOut(ProviderKind.opencodeGo.signInHint)
+            }
             return
         }
         var jobs: [OpenCodeGoFetchJob] = []
@@ -1526,6 +1564,7 @@ extension AppStore {
                 )
             }
         }
+        guard settings.allowImplicitGrok || settings.previewFixtures else { return [] }
         let implicit = states[.grok] ?? .idle
         switch implicit {
         case .ready, .stale, .loading, .failure:
@@ -1649,6 +1688,9 @@ extension AppStore {
         if !ambient {
             GrokAuth.removeManagedHomeIfSafe(homePath)
         }
+        if settings.grokAccounts.isEmpty {
+            settings.allowImplicitGrok = false
+        }
         if settings.selectedGrokAccountId == id {
             settings.selectedGrokAccountId = nil
             settings.resolveSelectedGrokAccount(preferring: signedInGrokAccountIDs())
@@ -1753,7 +1795,11 @@ extension AppStore {
     fileprivate func refreshAllGrokAccounts(userInitiated: Bool) async {
         let accounts = settings.grokAccounts
         if accounts.isEmpty {
-            await refreshImplicitGrok(userInitiated: userInitiated)
+            if settings.allowImplicitGrok || settings.previewFixtures {
+                await refreshImplicitGrok(userInitiated: userInitiated)
+            } else {
+                states[.grok] = .signedOut(ProviderKind.grok.signInHint)
+            }
             return
         }
         var jobs: [GrokFetchJob] = []

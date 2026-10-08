@@ -278,6 +278,14 @@ struct SettingsView: View {
                             SettingsSecondaryButton(title: "Add with session cookie", systemImage: "plus") {
                                 addChatGPTCookieAccount()
                             }
+                            SettingsRow(
+                                title: "Use ~/.codex",
+                                subtitle: "Show an implicit card from ~/.codex/auth.json when no accounts are saved."
+                            ) {
+                                Toggle("Use ~/.codex", isOn: implicitChatGPTBinding)
+                                    .labelsHidden()
+                                    .tint(Theme.settingsAccent)
+                            }
                         }
                         .padding(.horizontal, 12)
                         .padding(.bottom, 10)
@@ -325,6 +333,14 @@ struct SettingsView: View {
                     opencodeAmbientRow
                 }
                 SettingsCaption(text: "This environment key is not stored in Settings. Import copies it into the Keychain. Add account starts a new Keychain row and stops using the environment key until you paste one.")
+                SettingsRow(
+                    title: "Use environment key",
+                    subtitle: "Show an implicit card from OPENCODE_GO_API_KEY / OPENCODE_API_KEY when no accounts are saved."
+                ) {
+                    Toggle("Use environment key", isOn: implicitOpenCodeBinding)
+                        .labelsHidden()
+                        .tint(Theme.settingsAccent)
+                }
             } else {
                 SettingsGroup {
                     SettingsEmptyState(
@@ -335,6 +351,15 @@ struct SettingsView: View {
                         actionTitle: "Add account"
                     ) {
                         addOpenCodeAccount()
+                    }
+                    SettingsInsetHairline()
+                    SettingsRow(
+                        title: "Use environment key",
+                        subtitle: "Show an implicit card from OPENCODE_GO_API_KEY / OPENCODE_API_KEY when no accounts are saved."
+                    ) {
+                        Toggle("Use environment key", isOn: implicitOpenCodeBinding)
+                            .labelsHidden()
+                            .tint(Theme.settingsAccent)
                     }
                 }
             }
@@ -415,6 +440,14 @@ struct SettingsView: View {
                             SettingsCaption(text: "SuperGrok bearer is an optional fallback when Grok CLI login is not available or failed. QuotaBar stores it in the Keychain.")
                             SettingsSecondaryButton(title: "Add with SuperGrok bearer", systemImage: "plus") {
                                 addGrokAccountFromEmpty()
+                            }
+                            SettingsRow(
+                                title: "Use ~/.grok",
+                                subtitle: "Show an implicit card from ~/.grok/auth.json when no accounts are saved."
+                            ) {
+                                Toggle("Use ~/.grok", isOn: implicitGrokBinding)
+                                    .labelsHidden()
+                                    .tint(Theme.settingsAccent)
                             }
                         }
                         .padding(.horizontal, 12)
@@ -969,6 +1002,27 @@ struct SettingsView: View {
         Binding(
             get: { store.settings.enabledProviders.contains(provider) },
             set: { store.setEnabled(provider, enabled: $0) }
+        )
+    }
+
+    private var implicitChatGPTBinding: Binding<Bool> {
+        Binding(
+            get: { store.settings.allowImplicitChatGPT },
+            set: { store.setAllowImplicitChatGPT($0) }
+        )
+    }
+
+    private var implicitGrokBinding: Binding<Bool> {
+        Binding(
+            get: { store.settings.allowImplicitGrok },
+            set: { store.setAllowImplicitGrok($0) }
+        )
+    }
+
+    private var implicitOpenCodeBinding: Binding<Bool> {
+        Binding(
+            get: { store.settings.allowImplicitOpenCodeGo },
+            set: { store.setAllowImplicitOpenCodeGo($0) }
         )
     }
 

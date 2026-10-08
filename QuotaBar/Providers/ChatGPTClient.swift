@@ -41,7 +41,7 @@ enum ChatGPTClient {
         if let cookie {
             do {
                 let identity = try await fetchSession(cookie: cookie)
-                if !identitiesMatch(identity.email, expectedEmail) {
+                if !ChatGPTAccountIdentity.emailsCompatible(identity.email, expectedEmail) {
                     cookieUnauthorized = true
                     lastError = QuotaError.schema(
                         "Session cookie belongs to \(identity.email ?? "another account"), not \(expectedEmail ?? "this account")."
@@ -83,7 +83,7 @@ enum ChatGPTClient {
             triedCodexAuth = true
             do {
                 let tokens = try await CodexCLIAuth.resolve(home: scopedHome)
-                if !identitiesMatch(tokens.email, expectedEmail) {
+                if !ChatGPTAccountIdentity.emailsCompatible(tokens.email, expectedEmail) {
                     lastError = QuotaError.schema(
                         "Codex auth.json belongs to \(tokens.email ?? "another account"), not \(expectedEmail ?? "this account")."
                     )
@@ -113,12 +113,27 @@ enum ChatGPTClient {
             }
         }
 
-        let fallbackToken = cookieIdentity?.accessToken ?? codexTokens?.accessToken
-        let fallbackCookie = cookieIdentity == nil ? nil : cookie
-        let fallbackAccountId = cookieIdentity?.accountId ?? codexTokens?.accountId
-        let fallbackEmail = cookieIdentity?.email ?? codexTokens?.email
-        var fallbackPlan = cookieIdentity?.planName ?? codexTokens?.planName
-        var fallbackExpires = cookieIdentity?.planExpiresAt
+        let fallbackToken: String?
+        let fallbackCookie: String?
+        let fallbackAccountId: String?
+        let fallbackEmail: String?
+        var fallbackPlan: String?
+        var fallbackExpires: Date?
+        if let cookieIdentity {
+            fallbackToken = cookieIdentity.accessToken
+            fallbackCookie = cookie
+            fallbackAccountId = cookieIdentity.accountId
+            fallbackEmail = cookieIdentity.email
+            fallbackPlan = cookieIdentity.planName
+            fallbackExpires = cookieIdentity.planExpiresAt
+        } else {
+            fallbackToken = codexTokens?.accessToken
+            fallbackCookie = nil
+            fallbackAccountId = codexTokens?.accountId
+            fallbackEmail = codexTokens?.email
+            fallbackPlan = codexTokens?.planName
+            fallbackExpires = nil
+        }
 
         if let fallbackToken {
             if fallbackPlan == nil {
@@ -891,8 +906,8 @@ enum ChatGPTClient {
                 accessToken: current.accessToken,
                 cookie: nil,
                 accountId: current.accountId,
-                email: current.email ?? cookieIdentity?.email,
-                planName: current.planName ?? cookieIdentity?.planName,
+                email: current.email,
+                planName: current.planName,
                 now: now
             ) {
                 return .snapshot(try validatedSnapshot(
@@ -1008,13 +1023,9 @@ enum ChatGPTClient {
 
     // MARK: - Identity helpers
 
-    /// When both sides have an email, they must be the same account.
-    /// Missing email on either side is not a mismatch (session payloads omit it).
+    /// Both sides must have a usable email. A missing email is not a match.
     static func identitiesMatch(_ lhs: String?, _ rhs: String?) -> Bool {
-        guard let left = CodexCLIAuth.usableEmail(lhs),
-              let right = CodexCLIAuth.usableEmail(rhs)
-        else { return true }
-        return left.caseInsensitiveCompare(right) == .orderedSame
+        ChatGPTAccountIdentity.identitiesMatch(lhs, rhs)
     }
 
     private static func validatedSnapshot(
@@ -1022,7 +1033,7 @@ enum ChatGPTClient {
         expectedEmail: String?,
         planExpiresAt: Date? = nil
     ) throws -> UsageSnapshot {
-        guard identitiesMatch(snapshot.accountEmail, expectedEmail) else {
+        guard ChatGPTAccountIdentity.emailsCompatible(snapshot.accountEmail, expectedEmail) else {
             throw QuotaError.schema(
                 "Usage response was for \(snapshot.accountEmail ?? "another account"), not \(expectedEmail ?? "this account")."
             )

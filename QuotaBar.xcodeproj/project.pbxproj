@@ -62,6 +62,7 @@
 		000000000000000000000221 /* GrokAccountTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000220 /* GrokAccountTests.swift */; };
 		000000000000000000000231 /* HTTPClassifyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000230 /* HTTPClassifyTests.swift */; };
 		000000000000000000000233 /* FailureStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000232 /* FailureStateTests.swift */; };
+		000000000000000000000235 /* ChatGPTAccountIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000234 /* ChatGPTAccountIdentityTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -123,6 +124,7 @@
 		000000000000000000000220 /* GrokAccountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrokAccountTests.swift; sourceTree = "<group>"; };
 		000000000000000000000230 /* HTTPClassifyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPClassifyTests.swift; sourceTree = "<group>"; };
 		000000000000000000000232 /* FailureStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FailureStateTests.swift; sourceTree = "<group>"; };
+		000000000000000000000234 /* ChatGPTAccountIdentityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTAccountIdentityTests.swift; sourceTree = "<group>"; };
 		000000000000000000000206 /* QuotaBarTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = QuotaBarTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -278,6 +280,7 @@
 				000000000000000000000220 /* GrokAccountTests.swift */,
 				000000000000000000000230 /* HTTPClassifyTests.swift */,
 				000000000000000000000232 /* FailureStateTests.swift */,
+				000000000000000000000234 /* ChatGPTAccountIdentityTests.swift */,
 			);
 			path = QuotaBarTests;
 			sourceTree = "<group>";
@@ -452,6 +455,7 @@
 				000000000000000000000221 /* GrokAccountTests.swift in Sources */,
 				000000000000000000000231 /* HTTPClassifyTests.swift in Sources */,
 				000000000000000000000233 /* FailureStateTests.swift in Sources */,
+				000000000000000000000235 /* ChatGPTAccountIdentityTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

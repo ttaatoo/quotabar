@@ -5,7 +5,8 @@ struct ChatGPTAccount: Equatable, Codable, Identifiable, Hashable {
     var label: String
     var enabled: Bool
     var email: String?
-    /// Private or ambient Codex home whose `auth.json` this account reads. Never written by QuotaBar.
+    /// Private or ambient Codex home whose `auth.json` this account reads.
+    /// QuotaBar writes a rotated refresh token only into a managed home.
     var codexHomePath: String?
     var usesAmbientCodexHome: Bool
 
@@ -186,6 +187,12 @@ struct AppSettings: Equatable, Codable {
     var grokAccounts: [GrokAccount]
     /// Grok account whose remaining % is shown in the menu bar.
     var selectedGrokAccountId: UUID?
+    /// When no ChatGPT accounts are saved, show ~/.codex if this is true.
+    var allowImplicitChatGPT: Bool
+    /// When no Grok accounts are saved, show ~/.grok if this is true.
+    var allowImplicitGrok: Bool
+    /// When no OpenCode accounts are saved, show the env key if this is true.
+    var allowImplicitOpenCodeGo: Bool
 
     static let `default` = AppSettings(
         enabledProviders: ProviderKind.allCases,
@@ -203,7 +210,10 @@ struct AppSettings: Equatable, Codable {
         selectedOpenCodeGoAccountId: nil,
         didIntroduceOpenCodeGo: true,
         grokAccounts: [],
-        selectedGrokAccountId: nil
+        selectedGrokAccountId: nil,
+        allowImplicitChatGPT: true,
+        allowImplicitGrok: true,
+        allowImplicitOpenCodeGo: true
     )
 
     var visibleProviders: [ProviderKind] {
@@ -212,18 +222,15 @@ struct AppSettings: Equatable, Codable {
     }
 
     var visibleChatGPTAccounts: [ChatGPTAccount] {
-        let enabled = chatgptAccounts.filter(\.enabled)
-        return enabled.isEmpty ? chatgptAccounts : enabled
+        chatgptAccounts.filter(\.enabled)
     }
 
     var visibleOpenCodeGoAccounts: [OpenCodeGoAccount] {
-        let enabled = opencodeGoAccounts.filter(\.enabled)
-        return enabled.isEmpty ? opencodeGoAccounts : enabled
+        opencodeGoAccounts.filter(\.enabled)
     }
 
     var visibleGrokAccounts: [GrokAccount] {
-        let enabled = grokAccounts.filter(\.enabled)
-        return enabled.isEmpty ? grokAccounts : enabled
+        grokAccounts.filter(\.enabled)
     }
 
     mutating func sanitize() {

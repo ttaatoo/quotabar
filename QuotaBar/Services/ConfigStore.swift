@@ -208,6 +208,9 @@ private struct ConfigFile: Codable {
     var didIntroduceOpenCodeGo: Bool?
     var grokAccounts: [GrokAccount]?
     var selectedGrokAccountId: UUID?
+    var allowImplicitChatGPT: Bool?
+    var allowImplicitGrok: Bool?
+    var allowImplicitOpenCodeGo: Bool?
 
     /// Legacy / imported secrets. Written as null after migration.
     var glmApiKey: String?
@@ -231,6 +234,9 @@ private struct ConfigFile: Codable {
         didIntroduceOpenCodeGo = settings.didIntroduceOpenCodeGo
         grokAccounts = settings.grokAccounts
         selectedGrokAccountId = settings.selectedGrokAccountId
+        allowImplicitChatGPT = settings.allowImplicitChatGPT
+        allowImplicitGrok = settings.allowImplicitGrok
+        allowImplicitOpenCodeGo = settings.allowImplicitOpenCodeGo
         glmApiKey = nil
         cursorCookie = nil
         chatgptCookie = nil
@@ -257,6 +263,10 @@ private struct ConfigFile: Codable {
         value.didIntroduceOpenCodeGo = didIntroduceOpenCodeGo ?? false
         if let grokAccounts { value.grokAccounts = grokAccounts }
         if let selectedGrokAccountId { value.selectedGrokAccountId = selectedGrokAccountId }
+        // Missing key = existing installs keep first-run implicit ambient cards.
+        if let allowImplicitChatGPT { value.allowImplicitChatGPT = allowImplicitChatGPT }
+        if let allowImplicitGrok { value.allowImplicitGrok = allowImplicitGrok }
+        if let allowImplicitOpenCodeGo { value.allowImplicitOpenCodeGo = allowImplicitOpenCodeGo }
         return value
     }
 }
