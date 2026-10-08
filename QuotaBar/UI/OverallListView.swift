@@ -92,8 +92,7 @@ private struct OverallAccountRowView: View {
     }
 
     private var primaryWindow: UsageWindow? {
-        guard case .ready(let snapshot) = row.card.state else { return nil }
-        return snapshot.tightestWindow
+        return row.card.state.snapshot?.tightestWindow
     }
 
     private var secondaryText: String {

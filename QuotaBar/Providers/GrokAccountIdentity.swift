@@ -28,7 +28,7 @@ enum GrokAccountIdentity {
         /// Expired Grok sessions cannot be recovered by re-reading auth.json.
         static func action(for state: ProviderLoadState) -> Recovery {
             switch state {
-            case .failure(let message), .signedOut(let message):
+            case .failure(let message), .signedOut(let message), .stale(_, let message):
                 return GrokAuth.isExpiredTokenMessage(message) ? .relogin : .retryRefresh
             default:
                 return .retryRefresh

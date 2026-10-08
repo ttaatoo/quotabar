@@ -130,15 +130,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 text = "—"
                 warning = false
             }
-        case .signedOut, .failure:
+        case .stale(let snapshot, _):
+            let remaining: Double?
+            if store.selected == .chatgpt {
+                remaining = snapshot.chatGPTMenuRemaining
+            } else if store.selected == .cursor {
+                remaining = snapshot.cursorMenuRemaining
+            } else {
+                remaining = snapshot.mostConstrainedRemaining
+            }
+            if let remaining {
+                let displayed = mode == .remaining ? remaining : max(0, 100 - remaining)
+                text = "\(Int(displayed.rounded()))%"
+                warning = true
+            } else {
+                text = "!"
+                warning = true
+            }
+        case .signedOut(let message):
             text = "—"
-            warning = false
+            warning = CursorAuth.isRejectedSessionMessage(message)
+                || GrokAuth.isExpiredTokenMessage(message)
+                || message.lowercased().contains("expired")
+        case .failure:
+            text = "!"
+            warning = true
         case .idle, .loading:
             text = "···"
             warning = false
         }
 
-        button.image = StatusItemRenderer.image(text: text, warning: warning)
+        let stale = store.selectedState.staleMessage != nil
+        button.image = StatusItemRenderer.image(text: text, warning: warning, stale: stale)
         button.image?.isTemplate = false
     }
 

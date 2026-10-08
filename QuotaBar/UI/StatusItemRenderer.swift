@@ -10,12 +10,13 @@ enum StatusItemRenderer {
     /// Fixed menu-bar slot and pill width, sized once for the widest label (`100%`).
     static let itemWidth: CGFloat = measuredItemWidth()
 
-    static func image(text: String, warning: Bool) -> NSImage {
+    static func image(text: String, warning: Bool, stale: Bool = false) -> NSImage {
+        let textAlpha: CGFloat = stale ? 0.62 : 1.0
         let attributes: [NSAttributedString.Key: Any] = [
             .font: labelFont,
             .foregroundColor: warning
-                ? NSColor(calibratedRed: 1, green: 0.48, blue: 0.10, alpha: 1)
-                : NSColor.white
+                ? NSColor(calibratedRed: 1, green: 0.48, blue: 0.10, alpha: textAlpha)
+                : NSColor.white.withAlphaComponent(textAlpha)
         ]
         let textSize = (text as NSString).size(withAttributes: attributes)
         let width = itemWidth

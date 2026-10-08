@@ -91,7 +91,7 @@ enum RefreshWork {
             return quota
         }
         if error is CancellationError {
-            return .network("Timed out.")
+            return .network("Cancelled.")
         }
         return .network(error.localizedDescription)
     }

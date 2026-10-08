@@ -176,8 +176,7 @@ struct PopoverView: View {
             rows = store.accountCards
         }
         let ready = rows.compactMap { row -> UsageSnapshot? in
-            if case .ready(let snapshot) = row.state { return snapshot }
-            return nil
+            row.state.snapshot
         }
         let updated: String
         if let newest = ready.max(by: { $0.fetchedAt < $1.fetchedAt }) {
@@ -194,6 +193,8 @@ struct PopoverView: View {
             switch store.selectedState {
             case .ready(let snapshot):
                 updated = updatedText(from: snapshot)
+            case .stale(let snapshot, _):
+                updated = updatedText(from: snapshot) + " · stale"
             case .loading:
                 updated = "Updating…"
             case .idle:
@@ -247,6 +248,17 @@ struct AccountCard: View {
                 readyBody(snapshot)
                     .contentShape(Rectangle())
                     .onTapGesture { onActivate?() }
+            case .stale(let snapshot, let message):
+                VStack(alignment: .leading, spacing: Theme.accountCardSpacing) {
+                    readyBody(snapshot)
+                    EmptyStateView(
+                        title: "Couldn’t refresh",
+                        message: shortFailure(message),
+                        actionTitle: row.recoveryTitle,
+                        action: onRetry,
+                        onSelect: onActivate
+                    )
+                }
             case .loading:
                 updatingBody
             case .idle:
@@ -433,10 +445,7 @@ struct AccountCard: View {
     }
 
     private var planName: String? {
-        if case .ready(let snapshot) = row.state {
-            return snapshot.planName
-        }
-        return nil
+        return row.state.snapshot?.planName
     }
 
     private var hasKnownEmail: Bool {

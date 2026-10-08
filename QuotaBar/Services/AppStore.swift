@@ -192,7 +192,7 @@ final class AppStore: ObservableObject {
             switch state {
             case .signedOut:
                 fallback = "Not signed in"
-            case .ready(let snapshot):
+            case .ready(let snapshot), .stale(let snapshot, _):
                 if provider == .glm {
                     fallback = snapshot.accountEmail ?? snapshot.planName.map { "GLM \($0)" } ?? "GLM"
                 } else {
@@ -252,7 +252,7 @@ final class AppStore: ObservableObject {
     }
 
     private func overallHint(provider: ProviderKind, card: AccountCardRow) -> String {
-        if case .ready(let snapshot) = card.state, let plan = snapshot.planName, !plan.isEmpty {
+        if let snapshot = card.state.snapshot, let plan = snapshot.planName, !plan.isEmpty {
             return plan
         }
         if let label = overallAccountLabel(provider: provider, cardID: card.id),
@@ -305,7 +305,7 @@ final class AppStore: ObservableObject {
         }
         let implicit = states[.chatgpt] ?? .idle
         switch implicit {
-        case .ready, .loading, .failure:
+        case .ready, .stale, .loading, .failure:
             return [ChatGPTDisplayRow(id: Self.implicitChatGPTID, account: nil, state: implicit)]
         case .idle:
             if settings.previewFixtures {
@@ -344,8 +344,7 @@ final class AppStore: ObservableObject {
     }
 
     private func isSignedInChatGPT(_ id: UUID) -> Bool {
-        if case .ready = chatgptStates[id] { return true }
-        return false
+        chatgptStates[id]?.hasUsableSnapshot == true
     }
 
     /// Cookie, pasted JSON, or a readable `auth.json` for this account.
@@ -939,38 +938,14 @@ final class AppStore: ObservableObject {
             chatgptStates[item.id] = .ready(snapshot)
             recordChatGPTEmail(snapshot.accountEmail, for: item.id)
         case .failure(let error):
-            chatgptStates[item.id] = chatGPTFailureState(
+            if let quota = error as? QuotaError, quota.isCancellation { return }
+            chatgptStates[item.id] = ProviderLoadState.afterFailure(
                 previous: item.previous,
-                id: item.id,
-                error: error
+                error: error,
+                hasCredentials: hasChatGPTCredentials(item.id),
+                signInHint: ProviderKind.chatgpt.signInHint
             )
         }
-    }
-
-    /// Auth failure without credentials → signed out. Anything else keeps the
-    /// last snapshot so switching or a sibling fetch cannot wipe a good card.
-    private func chatGPTFailureState(
-        previous: ProviderLoadState,
-        id: UUID,
-        error: Error
-    ) -> ProviderLoadState {
-        let message: String
-        let authFailure: Bool
-        if let quota = error as? QuotaError {
-            message = quota.errorDescription ?? ProviderKind.chatgpt.signInHint
-            authFailure = quota.isAuthFailure
-        } else {
-            message = error.localizedDescription
-            authFailure = false
-        }
-
-        if case .ready(let snapshot) = previous {
-            return .ready(snapshot)
-        }
-        if authFailure, !hasChatGPTCredentials(id) {
-            return .signedOut(message)
-        }
-        return .failure(message)
     }
 
     /// Uses ~/.codex/auth.json when no ChatGPT account has been added yet.
@@ -1026,13 +1001,13 @@ final class AppStore: ObservableObject {
         case .success(let snapshot):
             states[.chatgpt] = .ready(snapshot)
         case .failure(let error):
-            if case .ready(let snapshot) = current {
-                states[.chatgpt] = .ready(snapshot)
-            } else if error.isAuthFailure {
-                states[.chatgpt] = .signedOut(error.errorDescription ?? ProviderKind.chatgpt.signInHint)
-            } else {
-                states[.chatgpt] = .failure(error.errorDescription ?? error.localizedDescription)
-            }
+            if error.isCancellation { return }
+            states[.chatgpt] = ProviderLoadState.afterFailure(
+                previous: current,
+                error: error,
+                hasCredentials: CodexCLIAuth.read() != nil,
+                signInHint: ProviderKind.chatgpt.signInHint
+            )
         }
     }
 
@@ -1059,7 +1034,7 @@ final class AppStore: ObservableObject {
         switch state {
         case .idle, .loading:
             return true
-        case .ready, .signedOut, .failure:
+        case .ready, .stale, .signedOut, .failure:
             return false
         }
     }
@@ -1135,7 +1110,7 @@ extension AppStore {
         }
         let implicit = states[.opencodeGo] ?? .idle
         switch implicit {
-        case .ready, .loading, .failure:
+        case .ready, .stale, .loading, .failure:
             return [OpenCodeGoDisplayRow(id: Self.implicitOpenCodeGoID, account: nil, state: implicit)]
         case .idle:
             if settings.previewFixtures || OpenCodeGoClient.resolveToken(explicit: nil) != nil {
@@ -1156,7 +1131,7 @@ extension AppStore {
         if OpenCodeGoClient.resolveToken(explicit: nil) != nil { return true }
         if settings.previewFixtures { return true }
         switch states[.opencodeGo] ?? .idle {
-        case .ready, .loading, .failure:
+        case .ready, .stale, .loading, .failure:
             return true
         case .idle, .signedOut:
             return false
@@ -1205,6 +1180,11 @@ extension AppStore {
                 return "\(percent)% left"
             }
             return snapshot.planName.map { "Live \($0) quota" } ?? "Live quota"
+        case .stale(let snapshot, let message):
+            if let remaining = snapshot.mostConstrainedRemaining {
+                return "\(Int(remaining.rounded()))% left · \(message)"
+            }
+            return message
         case .loading:
             return "Refreshing quota"
         case .failure(let message), .signedOut(let message):
@@ -1238,8 +1218,7 @@ extension AppStore {
     }
 
     private func isSignedInOpenCodeGo(_ id: UUID) -> Bool {
-        if case .ready = opencodeGoStates[id] { return true }
-        return false
+        opencodeGoStates[id]?.hasUsableSnapshot == true
     }
 
     func hasOpenCodeGoCredentials(_ id: UUID) -> Bool {
@@ -1285,7 +1264,7 @@ extension AppStore {
         guard let token = OpenCodeGoClient.resolveToken(explicit: nil) else { return nil }
         let id = addOpenCodeGoAccount(label: "OpenCode")
         setOpenCodeGoAPIKey(token, for: id)
-        if case .ready(let snapshot) = states[.opencodeGo] {
+        if let snapshot = states[.opencodeGo]?.snapshot {
             opencodeGoStates[id] = .ready(snapshot)
             recordOpenCodeGoEmail(snapshot.accountEmail, for: id)
         }
@@ -1388,35 +1367,14 @@ extension AppStore {
             opencodeGoStates[item.id] = .ready(snapshot)
             recordOpenCodeGoEmail(snapshot.accountEmail, for: item.id)
         case .failure(let error):
-            opencodeGoStates[item.id] = openCodeGoFailureState(
+            if let quota = error as? QuotaError, quota.isCancellation { return }
+            opencodeGoStates[item.id] = ProviderLoadState.afterFailure(
                 previous: item.previous,
-                id: item.id,
-                error: error
+                error: error,
+                hasCredentials: hasOpenCodeGoCredentials(item.id),
+                signInHint: ProviderKind.opencodeGo.signInHint
             )
         }
-    }
-
-    private func openCodeGoFailureState(
-        previous: ProviderLoadState,
-        id: UUID,
-        error: Error
-    ) -> ProviderLoadState {
-        let message: String
-        let authFailure: Bool
-        if let quota = error as? QuotaError {
-            message = quota.errorDescription ?? ProviderKind.opencodeGo.signInHint
-            authFailure = quota.isAuthFailure
-        } else {
-            message = error.localizedDescription
-            authFailure = false
-        }
-        if case .ready(let snapshot) = previous {
-            return .ready(snapshot)
-        }
-        if authFailure, !hasOpenCodeGoCredentials(id) {
-            return .signedOut(message)
-        }
-        return .failure(message)
     }
 
     private func refreshImplicitOpenCodeGo(userInitiated: Bool) async {
@@ -1438,13 +1396,13 @@ extension AppStore {
         case .success(let snapshot):
             states[.opencodeGo] = .ready(snapshot)
         case .failure(let error):
-            if case .ready(let snapshot) = current {
-                states[.opencodeGo] = .ready(snapshot)
-            } else if error.isAuthFailure {
-                states[.opencodeGo] = .signedOut(error.errorDescription ?? ProviderKind.opencodeGo.signInHint)
-            } else {
-                states[.opencodeGo] = .failure(error.errorDescription ?? "Something went wrong.")
-            }
+            if error.isCancellation { return }
+            states[.opencodeGo] = ProviderLoadState.afterFailure(
+                previous: current,
+                error: error,
+                hasCredentials: OpenCodeGoClient.resolveToken(explicit: nil) != nil,
+                signInHint: ProviderKind.opencodeGo.signInHint
+            )
         }
     }
 
@@ -1531,7 +1489,7 @@ extension AppStore {
         }
         let implicit = states[.grok] ?? .idle
         switch implicit {
-        case .ready, .loading, .failure:
+        case .ready, .stale, .loading, .failure:
             return [GrokDisplayRow(id: Self.implicitGrokID, account: nil, state: implicit)]
         case .idle:
             if settings.previewFixtures {
@@ -1577,8 +1535,7 @@ extension AppStore {
     }
 
     private func isSignedInGrok(_ id: UUID) -> Bool {
-        if case .ready = grokStates[id] { return true }
-        return false
+        grokStates[id]?.hasUsableSnapshot == true
     }
 
     func hasGrokCredentials(_ id: UUID) -> Bool {
@@ -1808,35 +1765,14 @@ extension AppStore {
             grokStates[item.id] = .ready(snapshot)
             recordGrokIdentity(snapshot.accountEmail, for: item.id)
         case .failure(let error):
-            grokStates[item.id] = grokFailureState(
+            if let quota = error as? QuotaError, quota.isCancellation { return }
+            grokStates[item.id] = ProviderLoadState.afterFailure(
                 previous: item.previous,
-                id: item.id,
-                error: error
+                error: error,
+                hasCredentials: hasGrokCredentials(item.id),
+                signInHint: ProviderKind.grok.signInHint
             )
         }
-    }
-
-    private func grokFailureState(
-        previous: ProviderLoadState,
-        id: UUID,
-        error: Error
-    ) -> ProviderLoadState {
-        let message: String
-        let authFailure: Bool
-        if let quota = error as? QuotaError {
-            message = quota.errorDescription ?? ProviderKind.grok.signInHint
-            authFailure = quota.isAuthFailure
-        } else {
-            message = error.localizedDescription
-            authFailure = false
-        }
-        if case .ready(let snapshot) = previous {
-            return .ready(snapshot)
-        }
-        if authFailure, !hasGrokCredentials(id) {
-            return .signedOut(message)
-        }
-        return .failure(message)
     }
 
     private func refreshImplicitGrok(userInitiated: Bool) async {
@@ -1860,13 +1796,13 @@ extension AppStore {
         case .success(let snapshot):
             states[.grok] = .ready(snapshot)
         case .failure(let error):
-            if case .ready(let snapshot) = current {
-                states[.grok] = .ready(snapshot)
-            } else if error.isAuthFailure {
-                states[.grok] = .signedOut(error.errorDescription ?? ProviderKind.grok.signInHint)
-            } else {
-                states[.grok] = .failure(error.errorDescription ?? "Something went wrong.")
-            }
+            if error.isCancellation { return }
+            states[.grok] = ProviderLoadState.afterFailure(
+                previous: current,
+                error: error,
+                hasCredentials: GrokAuth.loadAuthFile() != nil,
+                signInHint: ProviderKind.grok.signInHint
+            )
         }
     }
 
@@ -1958,7 +1894,7 @@ struct AccountCardRow: Identifiable, Equatable {
         if let email, !email.isEmpty {
             return email
         }
-        if case .ready(let snapshot) = state, let email = snapshot.accountEmail, !email.isEmpty {
+        if let email = state.snapshot?.accountEmail, !email.isEmpty {
             return email
         }
         if case .signedOut(let message) = state, !hasKnownEmail, !hasCredentials {
@@ -1978,6 +1914,10 @@ struct AccountCardRow: Identifiable, Equatable {
         switch state {
         case .ready(let snapshot):
             return snapshot.windows.isEmpty ? "No usage windows" : nil
+        case .stale(_, let message):
+            let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.count <= 80 { return trimmed }
+            return String(trimmed.prefix(77)) + "…"
         case .loading:
             return "Updating…"
         case .idle:

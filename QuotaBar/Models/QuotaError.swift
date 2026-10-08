@@ -31,4 +31,21 @@ enum QuotaError: LocalizedError, Equatable, Sendable {
             return false
         }
     }
+
+    var isCancellation: Bool {
+        if case .network(let message) = self {
+            return message == "Cancelled."
+        }
+        return false
+    }
+
+    /// Keep last meters only for transport / checkpoint failures — never auth, schema, or HTTP 4xx/5xx.
+    var shouldPreservePriorSnapshot: Bool {
+        switch self {
+        case .network(let message):
+            return message != "Cancelled."
+        default:
+            return false
+        }
+    }
 }

@@ -793,7 +793,7 @@ struct SettingsView: View {
             return store.cursorEmail == nil
         }
         switch state {
-        case .ready:
+        case .ready, .stale:
             return false
         case .signedOut, .failure:
             return true
@@ -862,7 +862,7 @@ struct SettingsView: View {
         if let identity = store.glmIdentity, !identity.isEmpty {
             return identity
         }
-        if case .ready(let snapshot) = store.states[.glm], let plan = snapshot.planName, !plan.isEmpty {
+        if let plan = store.states[.glm]?.snapshot?.planName, !plan.isEmpty {
             return "GLM \(plan)"
         }
         return "No identity yet"
