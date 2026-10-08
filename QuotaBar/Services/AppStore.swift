@@ -12,6 +12,9 @@ final class AppStore: ObservableObject {
     @Published var grokStates: [UUID: ProviderLoadState] = [:]
     @Published var now: Date = Date()
     @Published var isRefreshing = false
+    private let refreshCoordinator = RefreshCoordinator()
+    private var consecutivePollFailures = 0
+    private var lastScheduledPollAt: Date?
 
     @Published var cursorCookie: String = ""
     @Published var chatgptCookies: [UUID: String] = [:]
@@ -408,14 +411,51 @@ final class AppStore: ObservableObject {
 
     func restartPolling() {
         pollTimer?.invalidate()
-        let interval = TimeInterval(settings.pollIntervalSeconds)
-        pollTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+        consecutivePollFailures = 0
+        lastScheduledPollAt = Date()
+        scheduleNextPoll()
+    }
+
+    private func scheduleNextPoll() {
+        pollTimer?.invalidate()
+        let base = TimeInterval(settings.pollIntervalSeconds)
+        let interval = RefreshCoordinator.pollDelay(
+            base: base,
+            consecutiveFailures: consecutivePollFailures
+        )
+        let now = Date()
+        let next = RefreshCoordinator.nextScheduledAt(
+            previous: lastScheduledPollAt ?? now,
+            interval: interval,
+            now: now
+        )
+        lastScheduledPollAt = next
+        let delay = max(next.timeIntervalSince(now), 0.1)
+        pollTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             Task { @MainActor [self] in
                 await self?.refreshAll()
+                self?.scheduleNextPoll()
             }
         }
         if let pollTimer {
             RunLoop.main.add(pollTimer, forMode: .common)
+        }
+    }
+
+    private func syncRefreshingFlag() {
+        let next = refreshCoordinator.isRefreshing
+        if isRefreshing != next {
+            isRefreshing = next
+        }
+    }
+
+    func updateSettings(_ mutate: (inout AppSettings) -> Void) {
+        let previousInterval = settings.pollIntervalSeconds
+        mutate(&settings)
+        settings.sanitize()
+        persistSettings()
+        if settings.pollIntervalSeconds != previousInterval {
+            restartPolling()
         }
     }
 
@@ -477,13 +517,6 @@ final class AppStore: ObservableObject {
         }
         persistSettings()
         Task { await refresh(provider) }
-    }
-
-    func updateSettings(_ mutate: (inout AppSettings) -> Void) {
-        mutate(&settings)
-        settings.sanitize()
-        persistSettings()
-        restartPolling()
     }
 
     func persistSecrets() {
@@ -722,21 +755,21 @@ final class AppStore: ObservableObject {
         SettingsPresenter.open()
     }
 
-    func refreshSelected() async {
-        let alreadyRefreshing = isRefreshing
-        isRefreshing = true
+    func refreshSelected(force: Bool = true) async {
+        let key = "ui:selected"
+        let generation = refreshCoordinator.begin(key)
+        syncRefreshingFlag()
         defer {
-            if !alreadyRefreshing {
-                isRefreshing = false
-            }
+            refreshCoordinator.finish(key, generation: generation)
+            syncRefreshingFlag()
         }
         // Let SwiftUI paint the spinner before a fast fetch coalesces state updates.
         await Task.yield()
         switch settings.popoverTab {
         case .all:
-            await refreshVisibleProviders()
+            await refreshVisibleProviders(force: force, userInitiated: true)
         case .provider(let provider):
-            await refreshProviderAccounts(provider, userInitiated: true)
+            await refreshProviderAccounts(provider, userInitiated: true, force: force)
         }
     }
 
@@ -813,36 +846,92 @@ final class AppStore: ObservableObject {
     }
 
     func refreshAll() async {
-        isRefreshing = true
-        defer { isRefreshing = false }
-        await refreshVisibleProviders()
+        let key = "ui:all"
+        let generation = refreshCoordinator.begin(key)
+        syncRefreshingFlag()
+        defer {
+            refreshCoordinator.finish(key, generation: generation)
+            syncRefreshingFlag()
+        }
+        await refreshVisibleProviders(force: true, userInitiated: false)
     }
 
     /// Shared fan-out used by poll, All-tab refresh, and `refreshAll`.
     /// Does not invent a second pipeline — same `refresh(_:)` jobs as before.
-    private func refreshVisibleProviders() async {
-        let providers = visibleProviders
+    private func refreshVisibleProviders(force: Bool, userInitiated: Bool) async {
+        let providers = visibleProviders.filter { provider in
+            force || needsProviderRefresh(provider)
+        }
         // Paint every card as in-flight before any provider hops off MainActor.
         // Otherwise ChatGPT `.loading` + later `.idle` both read as "Updating…".
         for provider in providers {
-            markRefreshStarted(provider, userInitiated: false)
+            markRefreshStarted(provider, userInitiated: userInitiated)
         }
         // Fan-out off MainActor so ChatGPT / Go cannot stall Cursor / GLM / Grok.
         await RefreshWork.mapConcurrent(providers) { provider in
-            await AppStore.shared.refresh(provider)
+            await AppStore.shared.refresh(provider, userInitiated: userInitiated, force: true)
+        }
+        notePollOutcome()
+    }
+
+    private func refreshProviderAccounts(
+        _ provider: ProviderKind,
+        userInitiated: Bool,
+        force: Bool
+    ) async {
+        switch provider {
+        case .chatgpt:
+            await refreshAllChatGPTAccounts(userInitiated: userInitiated, force: force)
+        case .opencodeGo:
+            await refreshAllOpenCodeGoAccounts(userInitiated: userInitiated, force: force)
+        case .grok:
+            await refreshAllGrokAccounts(userInitiated: userInitiated, force: force)
+        case .cursor, .glm:
+            await refresh(provider, userInitiated: userInitiated, force: force)
         }
     }
 
-    private func refreshProviderAccounts(_ provider: ProviderKind, userInitiated: Bool) async {
+    private func needsProviderRefresh(_ provider: ProviderKind) -> Bool {
         switch provider {
         case .chatgpt:
-            await refreshAllChatGPTAccounts(userInitiated: userInitiated)
+            if settings.chatgptAccounts.isEmpty {
+                return RefreshCoordinator.needsOpenRefresh(states[.chatgpt] ?? .idle, force: false)
+            }
+            return visibleChatGPTAccounts.contains {
+                RefreshCoordinator.needsOpenRefresh(chatgptStates[$0.id] ?? .idle, force: false)
+            }
         case .opencodeGo:
-            await refreshAllOpenCodeGoAccounts(userInitiated: userInitiated)
+            if settings.opencodeGoAccounts.isEmpty {
+                return RefreshCoordinator.needsOpenRefresh(states[.opencodeGo] ?? .idle, force: false)
+            }
+            return visibleOpenCodeGoAccounts.contains {
+                RefreshCoordinator.needsOpenRefresh(opencodeGoStates[$0.id] ?? .idle, force: false)
+            }
         case .grok:
-            await refreshAllGrokAccounts(userInitiated: userInitiated)
+            if settings.grokAccounts.isEmpty {
+                return RefreshCoordinator.needsOpenRefresh(states[.grok] ?? .idle, force: false)
+            }
+            return visibleGrokAccounts.contains {
+                RefreshCoordinator.needsOpenRefresh(grokStates[$0.id] ?? .idle, force: false)
+            }
         case .cursor, .glm:
-            await refresh(provider)
+            return RefreshCoordinator.needsOpenRefresh(states[provider] ?? .idle, force: false)
+        }
+    }
+
+    private func notePollOutcome() {
+        let failed = visibleProviders.contains { provider in
+            switch providerState(provider) {
+            case .failure, .signedOut, .stale:
+                return true
+            default:
+                return false
+            }
+        }
+        if failed {
+            consecutivePollFailures = min(consecutivePollFailures + 1, 5)
+        } else {
+            consecutivePollFailures = 0
         }
     }
 
@@ -891,24 +980,44 @@ final class AppStore: ObservableObject {
                 }
             }
         default:
-            states[provider] = .loading
+            let current = states[provider] ?? .idle
+            if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
+                states[provider] = .loading
+            }
         }
     }
 
-    func refresh(_ provider: ProviderKind) async {
+    func refresh(
+        _ provider: ProviderKind,
+        userInitiated: Bool = false,
+        force: Bool = true
+    ) async {
         if provider == .chatgpt {
-            await refreshAllChatGPTAccounts(userInitiated: false)
+            await refreshAllChatGPTAccounts(userInitiated: userInitiated, force: force)
             return
         }
         if provider == .opencodeGo {
-            await refreshAllOpenCodeGoAccounts(userInitiated: false)
+            await refreshAllOpenCodeGoAccounts(userInitiated: userInitiated, force: force)
             return
         }
         if provider == .grok {
-            await refreshAllGrokAccounts(userInitiated: false)
+            await refreshAllGrokAccounts(userInitiated: userInitiated, force: force)
             return
         }
-        states[provider] = .loading
+        if !force, !RefreshCoordinator.needsOpenRefresh(states[provider] ?? .idle, force: false) {
+            return
+        }
+        let key = RefreshCoordinator.key(provider)
+        let generation = refreshCoordinator.begin(key)
+        syncRefreshingFlag()
+        defer {
+            refreshCoordinator.finish(key, generation: generation)
+            syncRefreshingFlag()
+        }
+        let current = states[provider] ?? .idle
+        if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
+            states[provider] = .loading
+        }
         let job = SingleProviderFetchJob(
             provider: provider,
             preview: settings.previewFixtures,
@@ -916,19 +1025,27 @@ final class AppStore: ObservableObject {
             glmAPIKey: emptyToNil(glmAPIKey),
             glmRegion: settings.glmRegion
         )
-        switch await RefreshWork.performSingle(job) {
+        let result = await RefreshWork.performSingle(job)
+        guard refreshCoordinator.isCurrent(key, generation: generation) else { return }
+        switch result {
         case .success(let snapshot):
             states[provider] = .ready(snapshot)
         case .failure(let error):
+            if error.isCancellation { return }
             if error.isAuthFailure {
                 states[provider] = .signedOut(error.errorDescription ?? provider.signInHint)
             } else {
-                states[provider] = .failure(error.errorDescription ?? "Something went wrong.")
+                states[provider] = ProviderLoadState.afterFailure(
+                    previous: current,
+                    error: error,
+                    hasCredentials: true,
+                    signInHint: provider.signInHint
+                )
             }
         }
     }
 
-    private func refreshAllChatGPTAccounts(userInitiated: Bool) async {
+    private func refreshAllChatGPTAccounts(userInitiated: Bool, force: Bool = true) async {
         let accounts = settings.chatgptAccounts
         if accounts.isEmpty {
             if settings.previewFixtures {
@@ -941,8 +1058,14 @@ final class AppStore: ObservableObject {
             return
         }
         var jobs: [ChatGPTFetchJob] = []
+        var generations: [UUID: Int] = [:]
         for (index, account) in accounts.enumerated() {
             let current = chatgptStates[account.id] ?? .idle
+            if !force, !RefreshCoordinator.needsOpenRefresh(current, force: false) {
+                continue
+            }
+            let key = RefreshCoordinator.key(.chatgpt, accountID: account.id)
+            generations[account.id] = refreshCoordinator.begin(key)
             if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
                 chatgptStates[account.id] = .loading
             }
@@ -961,19 +1084,31 @@ final class AppStore: ObservableObject {
                 )
             )
         }
+        syncRefreshingFlag()
 
         let results = await RefreshWork.mapConcurrent(jobs) { job in
             await RefreshWork.performChatGPT(job)
         }
         for item in results {
-            applyChatGPTResult(item)
+            let key = RefreshCoordinator.key(.chatgpt, accountID: item.id)
+            let generation = generations[item.id] ?? 0
+            applyChatGPTResult(item, key: key, generation: generation)
+            refreshCoordinator.finish(key, generation: generation)
         }
+        syncRefreshingFlag()
         ensureActiveChatGPTAccount()
     }
 
     private func refreshChatGPTAccount(_ id: UUID, userInitiated: Bool) async {
         guard settings.chatgptAccounts.contains(where: { $0.id == id }) else { return }
         let current = chatgptStates[id] ?? .idle
+        let key = RefreshCoordinator.key(.chatgpt, accountID: id)
+        let generation = refreshCoordinator.begin(key)
+        syncRefreshingFlag()
+        defer {
+            refreshCoordinator.finish(key, generation: generation)
+            syncRefreshingFlag()
+        }
         // Keep last meters while refreshing. Opening the popover used to
         // flash every card to "Updating…" and then paint a false Sign in
         // if one fetch failed.
@@ -994,10 +1129,11 @@ final class AppStore: ObservableObject {
             preview: settings.previewFixtures,
             variant: index
         )
-        applyChatGPTResult(await RefreshWork.performChatGPT(job))
+        applyChatGPTResult(await RefreshWork.performChatGPT(job), key: key, generation: generation)
     }
 
-    private func applyChatGPTResult(_ item: AccountFetchResult) {
+    private func applyChatGPTResult(_ item: AccountFetchResult, key: String, generation: Int) {
+        guard refreshCoordinator.isCurrent(key, generation: generation) else { return }
         switch item.result {
         case .success(let snapshot):
             chatgptStates[item.id] = .ready(snapshot)
@@ -1016,26 +1152,32 @@ final class AppStore: ObservableObject {
     /// Uses ~/.codex/auth.json when no ChatGPT account has been added yet.
     /// Does not persist a new account on each launch.
     private func refreshImplicitChatGPT(userInitiated: Bool) async {
+        let key = RefreshCoordinator.key(.chatgpt, accountID: Self.implicitChatGPTID)
+        let generation = refreshCoordinator.begin(key)
+        syncRefreshingFlag()
+        defer {
+            refreshCoordinator.finish(key, generation: generation)
+            syncRefreshingFlag()
+        }
         let current = states[.chatgpt] ?? .idle
         if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
             states[.chatgpt] = .loading
         }
-        applyImplicitChatGPT(
-            current,
-            await RefreshWork.performChatGPT(
-                ChatGPTFetchJob(
-                    id: Self.implicitChatGPTID,
-                    previous: current,
-                    cookie: nil,
-                    json: nil,
-                    home: nil,
-                    allowAmbient: true,
-                    email: nil,
-                    preview: false,
-                    variant: 0
-                )
+        let item = await RefreshWork.performChatGPT(
+            ChatGPTFetchJob(
+                id: Self.implicitChatGPTID,
+                previous: current,
+                cookie: nil,
+                json: nil,
+                home: nil,
+                allowAmbient: true,
+                email: nil,
+                preview: false,
+                variant: 0
             )
         )
+        guard refreshCoordinator.isCurrent(key, generation: generation) else { return }
+        applyImplicitChatGPT(current, item)
     }
 
     private func refreshChatGPTPreviewFallback(userInitiated _: Bool) async {
@@ -1382,7 +1524,7 @@ extension AppStore {
         }
     }
 
-    fileprivate func refreshAllOpenCodeGoAccounts(userInitiated: Bool) async {
+    fileprivate func refreshAllOpenCodeGoAccounts(userInitiated: Bool, force: Bool = true) async {
         let accounts = settings.opencodeGoAccounts
         if accounts.isEmpty {
             if settings.allowImplicitOpenCodeGo || settings.previewFixtures {
@@ -1393,8 +1535,14 @@ extension AppStore {
             return
         }
         var jobs: [OpenCodeGoFetchJob] = []
+        var generations: [UUID: Int] = [:]
         for (index, account) in accounts.enumerated() {
             let current = opencodeGoStates[account.id] ?? .idle
+            if !force, !RefreshCoordinator.needsOpenRefresh(current, force: false) {
+                continue
+            }
+            let key = RefreshCoordinator.key(.opencodeGo, accountID: account.id)
+            generations[account.id] = refreshCoordinator.begin(key)
             if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
                 opencodeGoStates[account.id] = .loading
             }
@@ -1409,19 +1557,31 @@ extension AppStore {
                 )
             )
         }
+        syncRefreshingFlag()
 
         let results = await RefreshWork.mapConcurrent(jobs) { job in
             await RefreshWork.performOpenCodeGo(job)
         }
         for item in results {
-            applyOpenCodeGoResult(item)
+            let key = RefreshCoordinator.key(.opencodeGo, accountID: item.id)
+            let generation = generations[item.id] ?? 0
+            applyOpenCodeGoResult(item, key: key, generation: generation)
+            refreshCoordinator.finish(key, generation: generation)
         }
+        syncRefreshingFlag()
         ensureActiveOpenCodeGoAccount()
     }
 
     fileprivate func refreshOpenCodeGoAccount(_ id: UUID, userInitiated: Bool) async {
         guard settings.opencodeGoAccounts.contains(where: { $0.id == id }) else { return }
         let current = opencodeGoStates[id] ?? .idle
+        let key = RefreshCoordinator.key(.opencodeGo, accountID: id)
+        let generation = refreshCoordinator.begin(key)
+        syncRefreshingFlag()
+        defer {
+            refreshCoordinator.finish(key, generation: generation)
+            syncRefreshingFlag()
+        }
         if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
             opencodeGoStates[id] = .loading
         }
@@ -1435,10 +1595,11 @@ extension AppStore {
             preview: settings.previewFixtures,
             variant: index
         )
-        applyOpenCodeGoResult(await RefreshWork.performOpenCodeGo(job))
+        applyOpenCodeGoResult(await RefreshWork.performOpenCodeGo(job), key: key, generation: generation)
     }
 
-    private func applyOpenCodeGoResult(_ item: AccountFetchResult) {
+    private func applyOpenCodeGoResult(_ item: AccountFetchResult, key: String, generation: Int) {
+        guard refreshCoordinator.isCurrent(key, generation: generation) else { return }
         switch item.result {
         case .success(let snapshot):
             opencodeGoStates[item.id] = .ready(snapshot)
@@ -1792,7 +1953,7 @@ extension AppStore {
         }
     }
 
-    fileprivate func refreshAllGrokAccounts(userInitiated: Bool) async {
+    fileprivate func refreshAllGrokAccounts(userInitiated: Bool, force: Bool = true) async {
         let accounts = settings.grokAccounts
         if accounts.isEmpty {
             if settings.allowImplicitGrok || settings.previewFixtures {
@@ -1803,31 +1964,53 @@ extension AppStore {
             return
         }
         var jobs: [GrokFetchJob] = []
+        var generations: [UUID: Int] = [:]
         for (index, account) in accounts.enumerated() {
             let current = grokStates[account.id] ?? .idle
+            if !force, !RefreshCoordinator.needsOpenRefresh(current, force: false) {
+                continue
+            }
+            let key = RefreshCoordinator.key(.grok, accountID: account.id)
+            generations[account.id] = refreshCoordinator.begin(key)
             if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
                 grokStates[account.id] = .loading
             }
             jobs.append(grokJob(for: account, previous: current, variant: index))
         }
+        syncRefreshingFlag()
 
         let results = await RefreshWork.mapConcurrent(jobs) { job in
             await RefreshWork.performGrok(job)
         }
         for item in results {
-            applyGrokResult(item)
+            let key = RefreshCoordinator.key(.grok, accountID: item.id)
+            let generation = generations[item.id] ?? 0
+            applyGrokResult(item, key: key, generation: generation)
+            refreshCoordinator.finish(key, generation: generation)
         }
+        syncRefreshingFlag()
         ensureActiveGrokAccount()
     }
 
     fileprivate func refreshGrokAccount(_ id: UUID, userInitiated: Bool) async {
         guard let account = settings.grokAccounts.first(where: { $0.id == id }) else { return }
         let current = grokStates[id] ?? .idle
+        let key = RefreshCoordinator.key(.grok, accountID: id)
+        let generation = refreshCoordinator.begin(key)
+        syncRefreshingFlag()
+        defer {
+            refreshCoordinator.finish(key, generation: generation)
+            syncRefreshingFlag()
+        }
         if shouldShowLoading(current) || (userInitiated && current.showsUserInitiatedLoading) {
             grokStates[id] = .loading
         }
         let index = settings.grokAccounts.firstIndex(where: { $0.id == id }) ?? 0
-        applyGrokResult(await RefreshWork.performGrok(grokJob(for: account, previous: current, variant: index)))
+        applyGrokResult(
+            await RefreshWork.performGrok(grokJob(for: account, previous: current, variant: index)),
+            key: key,
+            generation: generation
+        )
     }
 
     private func grokJob(for account: GrokAccount, previous: ProviderLoadState, variant: Int) -> GrokFetchJob {
@@ -1844,7 +2027,8 @@ extension AppStore {
         )
     }
 
-    private func applyGrokResult(_ item: AccountFetchResult) {
+    private func applyGrokResult(_ item: AccountFetchResult, key: String, generation: Int) {
+        guard refreshCoordinator.isCurrent(key, generation: generation) else { return }
         switch item.result {
         case .success(let snapshot):
             grokStates[item.id] = .ready(snapshot)

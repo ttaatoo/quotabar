@@ -39,9 +39,12 @@ struct SettingsView: View {
         }
         .onChange(of: store.cursorCookie) { _, _ in store.persistSecrets() }
         .onChange(of: store.glmAPIKey) { _, _ in store.persistSecrets() }
-        .onChange(of: store.settings) { _, _ in
+        .onChange(of: store.settings.pollIntervalSeconds) { _, _ in
             store.persistSettings()
             store.restartPolling()
+        }
+        .onChange(of: store.settings) { _, _ in
+            store.persistSettings()
         }
         .onChange(of: store.settings.previewFixtures) { _, _ in
             Task { await store.refreshAll() }

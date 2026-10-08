@@ -233,7 +233,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             popover.contentViewController?.view.window?.makeKey()
             paintPopoverChrome()
             startEventMonitor()
-            Task { await store.refreshSelected() }
+            Task { await store.refreshSelected(force: false) }
         }
     }
 

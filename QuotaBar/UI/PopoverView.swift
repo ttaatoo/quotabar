@@ -53,7 +53,7 @@ struct PopoverView: View {
             }
             Spacer(minLength: 8)
             Button {
-                Task { await store.refreshSelected() }
+                Task { await store.refreshSelected(force: true) }
             } label: {
                 RefreshSpinner(spinning: store.isRefreshing || isLoading)
             }

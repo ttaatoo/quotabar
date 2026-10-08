@@ -24,6 +24,7 @@
 		000000000000000000000018 /* LaunchAtLogin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000017 /* LaunchAtLogin.swift */; };
 		00000000000000000000001A /* AppStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000019 /* AppStore.swift */; };
 		0000000000000000000000C1 /* RefreshWork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0000000000000000000000C0 /* RefreshWork.swift */; };
+		000000000000000000000173 /* RefreshCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000172 /* RefreshCoordinator.swift */; };
 		00000000000000000000001C /* CursorAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001B /* CursorAuth.swift */; };
 		00000000000000000000001E /* CursorClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001D /* CursorClient.swift */; };
 		000000000000000000000020 /* ChatGPTClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000001F /* ChatGPTClient.swift */; };
@@ -63,6 +64,7 @@
 		000000000000000000000231 /* HTTPClassifyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000230 /* HTTPClassifyTests.swift */; };
 		000000000000000000000233 /* FailureStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000232 /* FailureStateTests.swift */; };
 		000000000000000000000235 /* ChatGPTAccountIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000234 /* ChatGPTAccountIdentityTests.swift */; };
+		000000000000000000000237 /* RefreshCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000236 /* RefreshCoordinatorTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -83,6 +85,7 @@
 		000000000000000000000017 /* LaunchAtLogin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLogin.swift; sourceTree = "<group>"; };
 		000000000000000000000019 /* AppStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStore.swift; sourceTree = "<group>"; };
 		0000000000000000000000C0 /* RefreshWork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefreshWork.swift; sourceTree = "<group>"; };
+		000000000000000000000172 /* RefreshCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefreshCoordinator.swift; sourceTree = "<group>"; };
 		00000000000000000000001B /* CursorAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorAuth.swift; sourceTree = "<group>"; };
 		00000000000000000000001D /* CursorClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorClient.swift; sourceTree = "<group>"; };
 		00000000000000000000001F /* ChatGPTClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTClient.swift; sourceTree = "<group>"; };
@@ -125,6 +128,7 @@
 		000000000000000000000230 /* HTTPClassifyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPClassifyTests.swift; sourceTree = "<group>"; };
 		000000000000000000000232 /* FailureStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FailureStateTests.swift; sourceTree = "<group>"; };
 		000000000000000000000234 /* ChatGPTAccountIdentityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTAccountIdentityTests.swift; sourceTree = "<group>"; };
+		000000000000000000000236 /* RefreshCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefreshCoordinatorTests.swift; sourceTree = "<group>"; };
 		000000000000000000000206 /* QuotaBarTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = QuotaBarTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -197,6 +201,7 @@
 				000000000000000000000015 /* ConfigStore.swift */,
 				000000000000000000000017 /* LaunchAtLogin.swift */,
 				0000000000000000000000C0 /* RefreshWork.swift */,
+				000000000000000000000172 /* RefreshCoordinator.swift */,
 				000000000000000000000019 /* AppStore.swift */,
 			);
 			path = Services;
@@ -281,6 +286,7 @@
 				000000000000000000000230 /* HTTPClassifyTests.swift */,
 				000000000000000000000232 /* FailureStateTests.swift */,
 				000000000000000000000234 /* ChatGPTAccountIdentityTests.swift */,
+				000000000000000000000236 /* RefreshCoordinatorTests.swift */,
 			);
 			path = QuotaBarTests;
 			sourceTree = "<group>";
@@ -416,6 +422,7 @@
 				000000000000000000000016 /* ConfigStore.swift in Sources */,
 				000000000000000000000018 /* LaunchAtLogin.swift in Sources */,
 				0000000000000000000000C1 /* RefreshWork.swift in Sources */,
+				000000000000000000000173 /* RefreshCoordinator.swift in Sources */,
 				00000000000000000000001A /* AppStore.swift in Sources */,
 				00000000000000000000001C /* CursorAuth.swift in Sources */,
 				00000000000000000000001E /* CursorClient.swift in Sources */,
@@ -456,6 +463,7 @@
 				000000000000000000000231 /* HTTPClassifyTests.swift in Sources */,
 				000000000000000000000233 /* FailureStateTests.swift in Sources */,
 				000000000000000000000235 /* ChatGPTAccountIdentityTests.swift in Sources */,
+				000000000000000000000237 /* RefreshCoordinatorTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
