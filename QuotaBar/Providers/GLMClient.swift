@@ -95,7 +95,8 @@ enum GLMClient {
             source: .live,
             extraFooter: extra
         )
-        snapshot.accountEmail = AccountIdentity.resolve(json: raw, token: token)
+        snapshot.accountEmail = AccountIdentity.fromShallowJSON(raw)
+            ?? token.flatMap(AccountIdentity.fromToken)
         return snapshot
     }
 
@@ -119,7 +120,7 @@ enum GLMClient {
                 )
                 guard (200...299).contains(response.statusCode) else { continue }
                 let object = try JSONWalk.object(from: data)
-                if let identity = AccountIdentity.fromJSON(object) {
+                if let identity = AccountIdentity.fromShallowJSON(object) {
                     return identity
                 }
             } catch {

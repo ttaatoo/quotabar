@@ -7,7 +7,9 @@ enum CursorAppLauncher {
 
     /// Official Mac build is still the Todesktop-wrapped Cursor.app.
     static let bundleIdentifiers = [
-        "com.todesktop.230313mzl4w4u92"
+        "com.todesktop.230313mzl4w4u92",
+        "com.anysphere.cursor",
+        "com.anysphere.Cursor"
     ]
 
     enum Outcome: Equatable {
@@ -24,6 +26,14 @@ enum CursorAppLauncher {
             if let url = workspace.urlForApplication(withBundleIdentifier: identifier) {
                 return url
             }
+        }
+        for app in workspace.runningApplications {
+            guard let identifier = app.bundleIdentifier?.lowercased(),
+                  identifier.contains("cursor"),
+                  !identifier.contains("quotabar"),
+                  let url = app.bundleURL
+            else { continue }
+            return url
         }
         let homeApps = fileManager.homeDirectoryForCurrentUser
             .appendingPathComponent("Applications/Cursor.app")

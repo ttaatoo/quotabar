@@ -91,7 +91,6 @@ enum ChatGPTClient {
                     let used = try await fetchWithCodexTokens(
                         tokens,
                         home: scopedHome,
-                        cookieIdentity: cookieIdentity,
                         expectedEmail: expectedEmail,
                         now: now
                     )
@@ -113,27 +112,18 @@ enum ChatGPTClient {
             }
         }
 
-        let fallbackToken: String?
-        let fallbackCookie: String?
-        let fallbackAccountId: String?
-        let fallbackEmail: String?
-        var fallbackPlan: String?
-        var fallbackExpires: Date?
-        if let cookieIdentity {
-            fallbackToken = cookieIdentity.accessToken
-            fallbackCookie = cookie
-            fallbackAccountId = cookieIdentity.accountId
-            fallbackEmail = cookieIdentity.email
-            fallbackPlan = cookieIdentity.planName
-            fallbackExpires = cookieIdentity.planExpiresAt
-        } else {
-            fallbackToken = codexTokens?.accessToken
-            fallbackCookie = nil
-            fallbackAccountId = codexTokens?.accountId
-            fallbackEmail = codexTokens?.email
-            fallbackPlan = codexTokens?.planName
-            fallbackExpires = nil
-        }
+        // One credential chain only — never cookie token + Codex email (or the reverse).
+        let fallback = exclusiveFallback(
+            cookieIdentity: cookieIdentity,
+            cookie: cookie,
+            codexTokens: cookieIdentity == nil ? codexTokens : nil
+        )
+        let fallbackToken = fallback.token
+        let fallbackCookie = fallback.cookie
+        let fallbackAccountId = fallback.accountId
+        var fallbackPlan = fallback.plan
+        var fallbackExpires = fallback.expires
+        let fallbackEmail = fallback.email
 
         if let fallbackToken {
             if fallbackPlan == nil {
@@ -290,7 +280,7 @@ enum ChatGPTClient {
 
     // MARK: - Auth
 
-    private struct Identity {
+    struct Identity {
         var accessToken: String
         var email: String?
         var planName: String?
@@ -896,7 +886,6 @@ enum ChatGPTClient {
     private static func fetchWithCodexTokens(
         _ tokens: CodexCLIAuth.Tokens,
         home: URL?,
-        cookieIdentity: Identity?,
         expectedEmail: String?,
         now: Date
     ) async throws -> CodexUsageResult {
@@ -913,7 +902,7 @@ enum ChatGPTClient {
                 return .snapshot(try validatedSnapshot(
                     snapshot,
                     expectedEmail: expectedEmail,
-                    planExpiresAt: cookieIdentity?.planExpiresAt
+                    planExpiresAt: nil
                 ))
             }
             return .emptyJSON
@@ -923,7 +912,7 @@ enum ChatGPTClient {
             } catch {
                 return .failed(error, attempted: tokens)
             }
-            guard identitiesMatch(current.email, expectedEmail) else {
+            guard ChatGPTAccountIdentity.emailsCompatible(current.email, expectedEmail) else {
                 return .failed(
                     QuotaError.schema(
                         "Codex auth.json belongs to \(current.email ?? "another account"), not \(expectedEmail ?? "this account")."
@@ -936,14 +925,14 @@ enum ChatGPTClient {
                     accessToken: current.accessToken,
                     cookie: nil,
                     accountId: current.accountId,
-                    email: current.email ?? cookieIdentity?.email,
-                    planName: current.planName ?? cookieIdentity?.planName,
+                    email: current.email,
+                    planName: current.planName,
                     now: now
                 ) {
                     return .snapshot(try validatedSnapshot(
                         snapshot,
                         expectedEmail: expectedEmail,
-                        planExpiresAt: cookieIdentity?.planExpiresAt
+                        planExpiresAt: nil
                     ))
                 }
                 return .emptyJSON
@@ -953,6 +942,35 @@ enum ChatGPTClient {
         } catch {
             return .failed(error, attempted: current)
         }
+    }
+
+    /// Cookie session and Codex home are alternate chains, never a mix of both.
+    static func exclusiveFallback(
+        cookieIdentity: Identity?,
+        cookie: String?,
+        codexTokens: CodexCLIAuth.Tokens?
+    ) -> (token: String?, cookie: String?, accountId: String?, email: String?, plan: String?, expires: Date?) {
+        if let cookieIdentity {
+            return (
+                cookieIdentity.accessToken,
+                cookie,
+                cookieIdentity.accountId,
+                cookieIdentity.email,
+                cookieIdentity.planName,
+                cookieIdentity.planExpiresAt
+            )
+        }
+        if let codexTokens {
+            return (
+                codexTokens.accessToken,
+                nil,
+                codexTokens.accountId,
+                codexTokens.email,
+                codexTokens.planName,
+                nil
+            )
+        }
+        return (nil, nil, nil, nil, nil, nil)
     }
 
     /// Cookie + ChatGPT-Account-Id first, then drop the fields that commonly 401 a second account.

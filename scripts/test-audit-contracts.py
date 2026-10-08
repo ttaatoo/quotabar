@@ -206,6 +206,22 @@ def recovery(state: str, message: str, provider: str) -> str:
     return "retryRefresh"
 
 
+def exclusive_fallback(cookie_identity: dict | None, cookie: str | None, codex_tokens: dict | None) -> dict:
+    if cookie_identity:
+        return {
+            "token": cookie_identity["token"],
+            "cookie": cookie,
+            "email": cookie_identity["email"],
+        }
+    if codex_tokens:
+        return {
+            "token": codex_tokens["token"],
+            "cookie": None,
+            "email": codex_tokens["email"],
+        }
+    return {"token": None, "cookie": None, "email": None}
+
+
 def needs_open_refresh(state: str, age_seconds: float, force: bool) -> bool:
     if force:
         return True
@@ -224,6 +240,7 @@ def main() -> int:
     assert require_ok(429, "rate limited") == "http-429"
     assert require_ok(503, "down") == "http-503"
     assert classify(403, '{"code":"unauthenticated"}', "application/json") == "unauthorized"
+    assert classify(403, '{"error":"forbidden","message":"token expired"}', "application/json") == "unauthorized"
 
     assert after_failure("ready", "unauthorized", True) == "failure"
     assert after_failure("ready", "notSignedIn", True) == "failure"
@@ -266,6 +283,18 @@ def main() -> int:
     assert grok_used_percent(None, reset_at=True) is None
     assert opencode_403('{"name":"EntitlementError"}') == "no-subscription"
     assert opencode_403("<html>nope</html>") == "http-403"
+
+    mixed = exclusive_fallback(
+        {"token": "cookie-token", "email": "cookie@example.com"},
+        "session=abc",
+        {"token": "codex-token", "email": "codex@example.com"},
+    )
+    assert mixed["token"] == "cookie-token"
+    assert mixed["email"] == "cookie@example.com"
+    assert mixed["cookie"] == "session=abc"
+    codex_only = exclusive_fallback(None, "session=abc", {"token": "codex-token", "email": "codex@example.com"})
+    assert codex_only["token"] == "codex-token"
+    assert codex_only["cookie"] is None
 
     assert needs_open_refresh("ready", 10, force=False) is False
     assert needs_open_refresh("ready", 45, force=False) is True

@@ -39,6 +39,11 @@ final class AppStore: ObservableObject {
         loadChatGPTSecrets()
         loadOpenCodeGoSecrets()
         loadGrokSecrets()
+        KeychainStore.reconcile(
+            chatgptIDs: settings.chatgptAccounts.map(\.id),
+            grokIDs: settings.grokAccounts.map(\.id),
+            opencodeIDs: settings.opencodeGoAccounts.map(\.id)
+        )
     }
 
     var selected: ProviderKind { settings.selectedProvider }
@@ -550,11 +555,23 @@ final class AppStore: ObservableObject {
     }
 
     func persistSecrets() {
+        secretsPersistTask?.cancel()
         KeychainStore.set(cursorCookie, account: .cursorCookie)
         KeychainStore.set(glmAPIKey, account: .glmAPIKey)
         persistChatGPTSecrets()
         persistOpenCodeGoSecrets()
         persistGrokSecrets()
+    }
+
+    private var secretsPersistTask: Task<Void, Never>?
+
+    func schedulePersistSecrets() {
+        secretsPersistTask?.cancel()
+        secretsPersistTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            persistSecrets()
+        }
     }
 
     private func persistChatGPTSecrets() {
@@ -566,12 +583,12 @@ final class AppStore: ObservableObject {
 
     func setChatGPTCookie(_ value: String, for id: UUID) {
         chatgptCookies[id] = value
-        KeychainStore.set(value, account: .chatgptAccountCookie(id))
+        schedulePersistSecrets()
     }
 
     func setChatGPTJSON(_ value: String, for id: UUID) {
         chatgptJSONs[id] = value
-        KeychainStore.set(value, account: .chatgptAccountJSON(id))
+        schedulePersistSecrets()
     }
 
     func persistSettings() {
@@ -695,6 +712,7 @@ final class AppStore: ObservableObject {
             setChatGPTCookie(trimmedCookie, for: existing.id)
             recordChatGPTEmail(emailValue, for: existing.id)
             settings.selectedChatGPTAccountId = existing.id
+            persistSecrets()
             persistSettings()
             Task { await refreshChatGPTAccount(existing.id, userInitiated: true) }
             return existing.id
@@ -705,6 +723,7 @@ final class AppStore: ObservableObject {
         recordChatGPTEmail(emailValue, for: id)
         settings.selectedChatGPTAccountId = id
         setChatGPTCookie(trimmedCookie, for: id)
+        persistSecrets()
         persistSettings()
         Task { await refreshChatGPTAccount(id, userInitiated: true) }
         return id
@@ -1580,6 +1599,7 @@ extension AppStore {
         guard let token = OpenCodeGoClient.resolveToken(explicit: nil) else { return nil }
         let id = addOpenCodeGoAccount(label: "OpenCode")
         setOpenCodeGoAPIKey(token, for: id)
+        persistSecrets()
         if let snapshot = states[.opencodeGo]?.snapshot {
             opencodeGoStates[id] = .ready(snapshot)
             recordOpenCodeGoEmail(snapshot.accountEmail, for: id)
@@ -1612,7 +1632,7 @@ extension AppStore {
 
     func setOpenCodeGoAPIKey(_ value: String, for id: UUID) {
         opencodeGoAPIKeys[id] = value
-        KeychainStore.set(value, account: .opencodeGoAPIKey(id))
+        schedulePersistSecrets()
     }
 
     fileprivate func persistOpenCodeGoSecrets() {
@@ -2024,7 +2044,7 @@ extension AppStore {
 
     func setGrokOAuthToken(_ value: String, for id: UUID) {
         grokTokens[id] = value
-        KeychainStore.set(value, account: .grokAccountOAuthToken(id))
+        schedulePersistSecrets()
     }
 
     @discardableResult

@@ -89,9 +89,10 @@ enum HTTPClassify {
         if object["shouldLogout"] as? Bool == true {
             return true
         }
-        let haystack = [
-            JSONWalk.string(object, keys: ["error", "code", "message"]) ?? ""
-        ].joined(separator: " ").lowercased()
+        let haystack = ["error", "code", "message"]
+            .compactMap { object[$0] as? String }
+            .joined(separator: " ")
+            .lowercased()
         let markers = [
             "not_authenticated",
             "not authenticated",

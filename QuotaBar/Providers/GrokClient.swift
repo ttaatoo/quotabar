@@ -82,28 +82,31 @@ enum GrokClient {
         let resetAt = periodEnd(from: config) ?? periodEnd(from: raw)
         let usedPercent = try usedPercent(from: config, resetAt: resetAt)
 
-        let title: String
-        if let kind = QuotaWindowKind.fromReset(resetAt, now: fetchedAt) {
-            title = kind.title
-        } else {
-            title = "Credits"
-        }
-
-        let window = UsageWindow(
-            title: title,
-            remainingPercent: Percent.remaining(used: usedPercent),
-            usedPercent: Percent.clamp(usedPercent),
-            resetAt: resetAt
-        )
-
         let session: UsageWindow?
         let weekly: UsageWindow?
-        if let kind = QuotaWindowKind.fromReset(resetAt, now: fetchedAt), kind == .session {
-            session = window
-            weekly = nil
+        if let usedPercent {
+            let title: String
+            if let kind = QuotaWindowKind.fromReset(resetAt, now: fetchedAt) {
+                title = kind.title
+            } else {
+                title = "Credits"
+            }
+            let window = UsageWindow(
+                title: title,
+                remainingPercent: Percent.remaining(used: usedPercent),
+                usedPercent: Percent.clamp(usedPercent),
+                resetAt: resetAt
+            )
+            if let kind = QuotaWindowKind.fromReset(resetAt, now: fetchedAt), kind == .session {
+                session = window
+                weekly = nil
+            } else {
+                session = nil
+                weekly = window
+            }
         } else {
             session = nil
-            weekly = window
+            weekly = nil
         }
 
         let plan = GrokAuth.displayPlanName(
@@ -118,7 +121,9 @@ enum GrokClient {
             session: session,
             weekly: weekly,
             source: .live,
-            extraFooter: nil
+            extraFooter: (session == nil && weekly == nil)
+                ? "No usage percent this billing period."
+                : nil
         )
         snapshot.accountEmail = email
             ?? GrokAccountIdentity.emailFromUserObject(raw)
@@ -126,9 +131,9 @@ enum GrokClient {
         return snapshot
     }
 
-    /// CodexBar rule: `creditUsagePercent`, else on-demand ratio, else 0% when a current
-    /// period is parseable. Never invent a bar from credits-alone with no period.
-    static func usedPercent(from config: [String: Any], resetAt: Date?) throws -> Double {
+    /// `creditUsagePercent`, else on-demand ratio. A period with no percent is
+    /// not 0% — callers treat `nil` as an empty usage state.
+    static func usedPercent(from config: [String: Any], resetAt: Date?) throws -> Double? {
         if let percent = JSONNumber.double(from: config["creditUsagePercent"]), percent.isFinite {
             return Percent.clamp(percent)
         }
@@ -140,7 +145,7 @@ enum GrokClient {
         }
 
         if resetAt != nil {
-            return 0
+            return nil
         }
 
         throw QuotaError.schema(

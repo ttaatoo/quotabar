@@ -63,13 +63,19 @@ enum KeychainStore {
         if updated == errSecItemNotFound {
             query[kSecValueData as String] = data
             query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-            SecItemAdd(query as CFDictionary, nil)
+            let added = SecItemAdd(query as CFDictionary, nil)
+            if added != errSecSuccess {
+                QuotaBarLog.keychain.error("Keychain add failed for \(account.rawValue, privacy: .public): \(added)")
+            }
             return
         }
         delete(account)
         query[kSecValueData as String] = data
         query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(query as CFDictionary, nil)
+        let added = SecItemAdd(query as CFDictionary, nil)
+        if added != errSecSuccess {
+            QuotaBarLog.keychain.error("Keychain replace-add failed for \(account.rawValue, privacy: .public): \(added)")
+        }
     }
 
     static func get(_ account: KeychainAccount) -> String? {
@@ -86,6 +92,62 @@ enum KeychainStore {
 
     static func delete(_ account: KeychainAccount) {
         SecItemDelete(baseQuery(account) as CFDictionary)
+    }
+
+    /// Drop per-UUID secrets that no longer belong to a saved account.
+    static func reconcile(
+        chatgptIDs: [UUID],
+        grokIDs: [UUID],
+        opencodeIDs: [UUID]
+    ) {
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll
+        ]
+        var out: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &out)
+        guard status == errSecSuccess, let items = out as? [[String: Any]] else { return }
+
+        var keep: Set<String> = [
+            KeychainAccount.cursorCookie.rawValue,
+            KeychainAccount.cursorRefreshedSession.rawValue,
+            KeychainAccount.chatgptCookie.rawValue,
+            KeychainAccount.chatgptJSON.rawValue,
+            KeychainAccount.glmAPIKey.rawValue,
+            KeychainAccount.grokOAuthToken.rawValue
+        ]
+        for id in chatgptIDs {
+            keep.insert(KeychainAccount.chatgptAccountCookie(id).rawValue)
+            keep.insert(KeychainAccount.chatgptAccountJSON(id).rawValue)
+        }
+        for id in grokIDs {
+            keep.insert(KeychainAccount.grokAccountOAuthToken(id).rawValue)
+        }
+        for id in opencodeIDs {
+            keep.insert(KeychainAccount.opencodeGoAPIKey(id).rawValue)
+        }
+
+        for item in items {
+            guard let account = item[kSecAttrAccount as String] as? String,
+                  isUUIDScoped(account),
+                  !keep.contains(account)
+            else { continue }
+            let deleteQuery: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: account
+            ]
+            SecItemDelete(deleteQuery as CFDictionary)
+        }
+    }
+
+    static func isUUIDScoped(_ account: String) -> Bool {
+        account.hasPrefix("chatgpt.cookie.")
+            || account.hasPrefix("chatgpt.json.")
+            || account.hasPrefix("opencodeGo.apiKey.")
+            || account.hasPrefix("grok.oauth-token.")
     }
 
     private static func baseQuery(_ account: KeychainAccount) -> [String: Any] {

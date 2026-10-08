@@ -50,6 +50,14 @@ final class HTTPClassifyTests: XCTestCase {
             HTTPClassify.classify(status: 403, data: Data(#"{"code":"unauthenticated"}"#.utf8), contentType: "application/json"),
             .unauthorized
         )
+        XCTAssertEqual(
+            HTTPClassify.classify(
+                status: 403,
+                data: Data(#"{"error":"forbidden","message":"token expired"}"#.utf8),
+                contentType: "application/json"
+            ),
+            .unauthorized
+        )
     }
 
     func test429IsRateLimitedNotAuth() throws {

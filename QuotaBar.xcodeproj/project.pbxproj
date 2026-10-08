@@ -66,6 +66,7 @@
 		000000000000000000000233 /* FailureStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000232 /* FailureStateTests.swift */; };
 		000000000000000000000235 /* ChatGPTAccountIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000234 /* ChatGPTAccountIdentityTests.swift */; };
 		000000000000000000000237 /* RefreshCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000236 /* RefreshCoordinatorTests.swift */; };
+		000000000000000000000239 /* ProviderFixTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000238 /* ProviderFixTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -131,6 +132,7 @@
 		000000000000000000000232 /* FailureStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FailureStateTests.swift; sourceTree = "<group>"; };
 		000000000000000000000234 /* ChatGPTAccountIdentityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatGPTAccountIdentityTests.swift; sourceTree = "<group>"; };
 		000000000000000000000236 /* RefreshCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefreshCoordinatorTests.swift; sourceTree = "<group>"; };
+		000000000000000000000238 /* ProviderFixTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderFixTests.swift; sourceTree = "<group>"; };
 		000000000000000000000206 /* QuotaBarTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = QuotaBarTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -290,6 +292,7 @@
 				000000000000000000000232 /* FailureStateTests.swift */,
 				000000000000000000000234 /* ChatGPTAccountIdentityTests.swift */,
 				000000000000000000000236 /* RefreshCoordinatorTests.swift */,
+				000000000000000000000238 /* ProviderFixTests.swift */,
 			);
 			path = QuotaBarTests;
 			sourceTree = "<group>";
@@ -468,6 +471,7 @@
 				000000000000000000000233 /* FailureStateTests.swift in Sources */,
 				000000000000000000000235 /* ChatGPTAccountIdentityTests.swift in Sources */,
 				000000000000000000000237 /* RefreshCoordinatorTests.swift in Sources */,
+				000000000000000000000239 /* ProviderFixTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

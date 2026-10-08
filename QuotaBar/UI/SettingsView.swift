@@ -48,8 +48,8 @@ struct SettingsView: View {
                 didUnlockSection = true
             }
         }
-        .onChange(of: store.cursorCookie) { _, _ in store.persistSecrets() }
-        .onChange(of: store.glmAPIKey) { _, _ in store.persistSecrets() }
+        .onChange(of: store.cursorCookie) { _, _ in store.schedulePersistSecrets() }
+        .onChange(of: store.glmAPIKey) { _, _ in store.schedulePersistSecrets() }
         .onChange(of: store.settings.pollIntervalSeconds) { _, _ in
             store.persistSettings()
             store.restartPolling()

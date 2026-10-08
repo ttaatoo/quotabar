@@ -93,6 +93,21 @@ final class FailureStateTests: XCTestCase {
         ).showsRecoveryAction)
     }
 
+    func testFetchAttemptMarksPreservedStale() {
+        let attempt = FetchAttempt(
+            id: "chatgpt:a",
+            provider: .chatgpt,
+            accountLabel: "a@example.com",
+            finishedAt: Date(),
+            kind: "stale",
+            message: "Timed out after 30s.",
+            durationMs: 1200,
+            preservedStale: true
+        )
+        XCTAssertTrue(attempt.summary.contains("kept meters"))
+        XCTAssertTrue(attempt.summary.contains("ChatGPT"))
+    }
+
     func testNetworkFailureKeepsRetry() {
         let stale = ProviderLoadState.stale(snapshot(), message: "Timed out after 30s.")
         XCTAssertEqual(ChatGPTAccountIdentity.Recovery.action(for: stale), .retryRefresh)

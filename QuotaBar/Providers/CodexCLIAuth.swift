@@ -1,10 +1,9 @@
 import Foundation
 
 /// Reads Codex CLI `auth.json`. QuotaBar never starts a ChatGPT OAuth app.
-/// For a home we already have, an expired access token is refreshed with the
-/// same public Codex client + `refresh_token` the CLI uses, then written back
-/// (refresh tokens rotate). That is required for a second managed Codex home:
-/// the CLI does not poll those files, so a stale `access_token` 401s forever.
+/// For a managed home we already have, an expired access token is refreshed
+/// with the same public Codex client + `refresh_token` the CLI uses, then
+/// written back (refresh tokens rotate). Ambient `~/.codex` is never written.
 enum CodexCLIAuth {
     static let oauthClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
     static let defaultRefreshURL = URL(string: "https://auth.openai.com/oauth/token")!
@@ -177,7 +176,9 @@ enum CodexCLIAuth {
 
         persistLock.lock()
         defer { persistLock.unlock() }
-        try writeRefreshed(home: home, tokens: next)
+        if isManagedHome(home) {
+            try writeRefreshed(home: home, tokens: next)
+        }
         return next
     }
 

@@ -84,9 +84,9 @@ final class CodexLoginPresenter {
         let alert = NSAlert()
         alert.messageText = "ChatGPT account added"
         if let email, !email.isEmpty {
-            alert.informativeText = "Imported \(email) from ~/.codex/auth.json. QuotaBar only reads that file."
+            alert.informativeText = "Imported \(email) from ~/.codex/auth.json. Login is written by the CLI; QuotaBar only writes a rotated refresh token into a managed Codex home."
         } else {
-            alert.informativeText = "Imported the Codex CLI session from ~/.codex/auth.json. QuotaBar only reads that file."
+            alert.informativeText = "Imported the Codex CLI session from ~/.codex/auth.json. Login is written by the CLI; QuotaBar only writes a rotated refresh token into a managed Codex home."
         }
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
